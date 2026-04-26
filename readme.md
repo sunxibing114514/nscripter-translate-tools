@@ -157,29 +157,19 @@ translate.py 用于批量翻译 纯文本行 文件（例如 nscript_tool.py 提
 
 参数说明
 
-|参数| 必填 |说明|
-
-|provider |是 |提供商：openai、deepseek、qwen、zhipu。若自定义 api_base 则自动使用自定义端点 |
-
-|api_key |是 |对应平台的 API 密钥 |
-
-|api_base|否 |自定义 API 端点；留空则根据 provider 自动填充默认地址 |
-
-|model |是 |模型名称，例如 gpt-4o、deepseek-chat、qwen-plus、glm-4 |
-
-|source_language |是 |原文语言（写入提示词） |
-
-|target_language |是 |目标语言，同时用于输出文件名 |
-
-|input_file |是 |待翻译文件的路径（支持相对/绝对） |
-
-|output_dir |否 |译文输出目录，默认 ./aitrans |
-
-|concurrency |否 |并发线程数，默认 3 |
-
-|max_requests_per_second |否 |最大每秒请求数，默认 5（请根据各平台限制调整） |
-
-|glossary |否 |术语表对象，或设为 "interactive" 表示运行时手动输入（详见下文） |
+| 参数 | 必填 | 说明 |
+| :--- | :--- | :--- |
+| `provider` | 是 | 提供商：`openai`、`deepseek`、`qwen`、`zhipu`。若自定义 `api_base` 则自动使用自定义端点 |
+| `api_key` | 是 | 对应平台的 API 密钥 |
+| `api_base` | 否 | 自定义 API 端点；留空则根据 `provider` 自动填充默认地址 |
+| `model` | 是 | 模型名称，例如 `gpt-4o`、`deepseek-chat`、`qwen-plus`、`glm-4` |
+| `source_language` | 是 | 原文语言（写入提示词） |
+| `target_language` | 是 | 目标语言，同时用于输出文件名 |
+| `input_file` | 是 | 待翻译文件的路径（支持相对/绝对） |
+| `output_dir` | 否 | 译文输出目录，默认 `./aitrans` |
+| `concurrency` | 否 | 并发线程数，默认 `3` |
+| `max_requests_per_second` | 否 | 最大每秒请求数，默认 `5`（请根据各平台限制调整） |
+| `glossary` | 否 | 术语表对象，或设为 `"interactive"` 表示运行时手动输入（详见下文） |
 
 
 

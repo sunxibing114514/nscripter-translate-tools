@@ -1,0 +1,13 @@
+{
+  "provider": "deepseek",
+  "api_key": "your-api-key-here",
+  "api_base": "",
+  "model": "deepseek-chat",
+  "source_language": "Japanese",
+  "target_language": "Chinese",
+  "input_file": "./out/01.txt",
+  "output_dir": "./aitrans",
+  "concurrency": 5,
+  "max_requests_per_second": 10,
+  "glossary": {}
+}

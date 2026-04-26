@@ -1,7 +1,7 @@
 # NScripter 项目工具集
 
 > **AI 参与声明**  
-> 本项目中的 `nscript_tool.py`、`translate.py` 以及本说明文档均由 AI 辅助生成。  
+> 本项目中的 `nscript_tool.py`、`translate.py` 等 以及本说明文档均由 AI 辅助生成。  
 > **编写原因**  
 > 目前 NScripter 脚本处理工具通常只能在电脑上运行，为了在安卓手机上也能完成文本提取、翻译和注入的全流程，特编写此工具集供个人汉化使用,同时提供ai翻译功能。
 
@@ -9,6 +9,7 @@
 
 - **`nscript_tool.py`** — 从 `.txt` 脚本中提取可翻译文本，或把翻译好的文本注入回脚本，同时保持编码和脚本结构。
 - **`translate.py`** — 基于大语言模型（LLM）的批量翻译工具，支持术语表、并发请求和速率控制，适合翻译用 `nscript_tool.py` 提取出来的文本文件。
+- **`fix_slashes.py`** — 基于翻译完成后,缺少\/符号的问题进行修复。
 
 通过两个工具组合，可以高效完成 NScripter 游戏的汉化（或其他语言本地化）。
 
@@ -21,6 +22,7 @@
 nscript/
 ├── config.json          # 翻译工具配置文件
 ├── nscript_tool.py      # 文本提取/注入工具
+├── fix_slashes.py       # 修复符号缺失错误
 ├── readme.md            # 本文件
 └── translate.py         # LLM 批量翻译脚本
 
@@ -122,7 +124,7 @@ python nscript_tool.py inject 01.txt translations/01.txt --in-encoding shift_jis
 
 ---
 
-1. translate.py —— LLM 批量翻译
+2. translate.py —— LLM 批量翻译
 
 功能简介
 
@@ -253,6 +255,25 @@ python translate.py my_config.json
 · 控制台：INFO 级别，显示行号、请求发送等基本信息。
 · 日志文件（translate.log）：DEBUG 级别，记录完整的 API 请求原文和原始响应，便于调试。
 
+
+3. fix_slashes.py
+
+功能简介
+
+修复ai翻译完成后,缺失\/符号的问题
+
+使用方式
+
+```bash
+python fix_slashes.py <原文件> <翻译后文件> <输出文件>
+```
+
+例如
+
+```bash
+python fix_slashes.py /storage/emulated/0/Download/nscript/out/nscript_decoded.txt /storage/emulated/0/Download/nscript/aitrans/nscript_decoded_Chinese.txt /storage/emulated/0/Download/nscript/slashesout/0.txt
+```
+
 ---
 
 完整工作流程示例
@@ -287,12 +308,17 @@ python translate.py my_config.json
    python translate.py
    ```
    翻译完成后在 aitrans/ 下得到 game_script_Chinese.txt。
-4. 注入回脚本
+4. 修复符号
    ```bash
-   python nscript_tool.py inject game_script.txt aitrans/game_script_Chinese.txt \
+   python fix_slashes.py game_script.txt aitrans/game_script_Chinese.txt fixout/0.txt
+   ```
+   翻译完成后在 aitrans/ 下得到 game_script_Chinese.txt。
+5. 注入回脚本
+   ```bash
+   python nscript_tool.py inject game_script.txt fixout/0.txt \
        --in-encoding shift_jis --out-encoding shift_jis --trans-encoding utf8
    ```
-   在 injected/ 目录下得到完全本地化的 game_script.txt，可直接放入游戏工程使用。
+   在 injected/ 目录下得到完全本地化的 game_script.txt，可修改为0.txt直接放入游戏工程使用。
 
 ---
 

@@ -107,7 +107,9 @@ python nscript_tool.py inject <原始脚本> <翻译文件> \
 命令速查
 
 操作 命令示例
+
 提取文本 python nscript_tool.py extract 01.txt --in-encoding shift_jis --expand
+
 注入翻译 python nscript_tool.py inject 01.txt translations/01.txt --in-encoding shift_jis --trans-encoding utf8
 
 详细帮助可通过 python nscript_tool.py -h 查看。
@@ -175,6 +177,24 @@ zhipu https://open.bigmodel.cn/api/paas/v4
 在 config.json 中直接添加 glossary 对象可以强制某些词汇按指定翻译：
 
 ```json
+"glossary": {
+    "龍": "龙",
+    "精霊": "精灵",
+    "魔法陣": "魔法阵"
+}
+```
+
+如和让ai给你输出术语表/你需要上传文本文件
+```text
+请阅读上传文本，提取其中的专业术语或需要保持翻译一致的名词,例如人名/活动名/地名等，生成一个术语表。
+
+要求：
+1. 以 JSON 对象格式输出，键为原文，值为你认为最合适的目标语言翻译（若未指定目标语言，则使用目标语言 = 英文）。
+2. 如果术语有多种可能译文，选择最通用或上下文最贴切的一个。
+3. 忽略标点、格式标记等非术语内容。
+4. 只输出 JSON，不要额外解释。
+
+实例格式
 "glossary": {
     "龍": "龙",
     "精霊": "精灵",

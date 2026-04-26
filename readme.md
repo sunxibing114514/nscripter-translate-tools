@@ -312,13 +312,13 @@ python fix_slashes.py /storage/emulated/0/Download/nscript/out/nscript_decoded.t
    ```bash
    python fix_slashes.py game_script.txt aitrans/game_script_Chinese.txt fixout/0.txt
    ```
-   翻译完成后在 aitrans/ 下得到 game_script_Chinese.txt。
+   翻译完成后在 fixout/ 下得到 0.txt。
 5. 注入回脚本
    ```bash
    python nscript_tool.py inject game_script.txt fixout/0.txt \
        --in-encoding shift_jis --out-encoding shift_jis --trans-encoding utf8
    ```
-   在 injected/ 目录下得到完全本地化的 game_script.txt，可修改为0.txt直接放入游戏工程使用。
+   在 injected/ 目录下得到完全本地化的 0.txt，直接放入游戏工程使用。
 
 ---
 

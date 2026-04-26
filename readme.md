@@ -1,4 +1,3 @@
-```markdown
 # NScripter 项目工具集
 
 > **AI 参与声明**  

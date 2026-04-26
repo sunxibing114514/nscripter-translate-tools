@@ -108,9 +108,15 @@ python nscript_tool.py inject <原始脚本> <翻译文件> \
 
 操作 命令示例
 
-提取文本 python nscript_tool.py extract 01.txt --in-encoding shift_jis --expand
+提取文本 
+```bash
+python nscript_tool.py extract 01.txt --in-encoding shift_jis --expand
+```
 
-注入翻译 python nscript_tool.py inject 01.txt translations/01.txt --in-encoding shift_jis --trans-encoding utf8
+注入翻译 
+```bash
+python nscript_tool.py inject 01.txt translations/01.txt --in-encoding shift_jis --trans-encoding utf8
+```
 
 详细帮助可通过 python nscript_tool.py -h 查看。
 

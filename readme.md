@@ -49,10 +49,10 @@ pip install requests
 
 nscript_tool.py 专为 NScripter 脚本设计，能够：
 
-· 提取：识别脚本中的三类可翻译文本：
-· 反引号行（ `  开头）
-· 双引号行（" 开头）
-· 普通文本行（非命令行、非注释）
+- 提取：识别脚本中的三类可翻译文本：
+- 反引号行（ `  开头）
+- 双引号行（" 开头）
+- 普通文本行（非命令行、非注释）
 提取结果按 类型:内容 格式保存，如：
 
 ```
@@ -61,13 +61,13 @@ nscript_tool.py 专为 NScripter 脚本设计，能够：
   T:这里是普通文本
 ```
 
-· 注入：将翻译后的文件（保持同类格式）替换回原脚本的对应位置，输出完整的新脚本。
-· 编码支持：可指定输入/输出编码（如 shift_jis、utf8），适用于日文原版游戏。
-· 符号展开：提取时可将 NScripter 的换行控制符 @ 和 ¥ 转换为真实换行，方便翻译人员阅读。
+- 注入：将翻译后的文件（保持同类格式）替换回原脚本的对应位置，输出完整的新脚本。
+- 编码支持：可指定输入/输出编码（如 shift_jis、utf8），适用于日文原版游戏。
+- 符号展开：提取时可将 NScripter 的换行控制符 @ 和 ¥ 转换为真实换行，方便翻译人员阅读。
 
-使用方法
+## 使用方法
 
-提取文本
+### 提取文本
 
 ```bash
 python nscript_tool.py extract <输入脚本> \
@@ -77,15 +77,15 @@ python nscript_tool.py extract <输入脚本> \
     --expand
 ```
 
-· <输入脚本>：原始 .txt 脚本（如 01.txt）
-· --in-encoding：原脚本编码，日文游戏常用 shift_jis
-· --out-encoding：提取后翻译文件的编码，推荐 utf8
-· --out-dir：输出目录，默认为 out
-· --expand：可选，将 @ 和 ¥ 转换为换行符，便于翻译时阅读
+- <输入脚本>：原始 .txt 脚本（如 01.txt）
+- --in-encoding：原脚本编码，日文游戏常用 shift_jis
+- --out-encoding：提取后翻译文件的编码，推荐 utf8
+- --out-dir：输出目录，默认为 out
+- --expand：可选，将 @ 和 ¥ 转换为换行符，便于翻译时阅读
 
 提取后，会在 out/ 下生成与原文件同名的翻译文件（如 out/01.txt）。
 
-注入翻译
+### 注入翻译
 
 ```bash
 python nscript_tool.py inject <原始脚本> <翻译文件> \
@@ -95,16 +95,16 @@ python nscript_tool.py inject <原始脚本> <翻译文件> \
     --out-dir injected
 ```
 
-· <原始脚本>：最初用于提取的脚本
-· <翻译文件>：翻译完成的文件（格式与提取结果一致）
-· --in-encoding：原始脚本编码
-· --out-encoding：生成的新脚本编码，通常与原始脚本一致
-· --trans-encoding：翻译文件的编码
-· --out-dir：输出目录，默认为 injected
+- <原始脚本>：最初用于提取的脚本
+- <翻译文件>：翻译完成的文件（格式与提取结果一致）
+- --in-encoding：原始脚本编码
+- --out-encoding：生成的新脚本编码，通常与原始脚本一致
+- --trans-encoding：翻译文件的编码
+- --out-dir：输出目录，默认为 injected
 
 注入完成后，在 injected/ 下会得到可直接用于游戏引擎的新脚本。
 
-命令速查
+###命令速查
 
 操作 命令示例
 
@@ -151,25 +151,43 @@ translate.py 用于批量翻译 纯文本行 文件（例如 nscript_tool.py 提
 
 参数说明
 
-参数 必填 说明
-provider 是 提供商：openai、deepseek、qwen、zhipu。若自定义 api_base 则自动使用
-api_key 是 对应平台的 API 密钥
-api_base 否 自定义 API 端点；留空则根据 provider 自动填充默认地址
-model 是 模型名称，例如 gpt-4o、deepseek-chat、qwen-plus、glm-4
-source_language 是 原文语言（写入提示词）
-target_language 是 目标语言，同时用于输出文件名
-input_file 是 待翻译文件的路径（支持相对/绝对）
-output_dir 否 译文输出目录，默认 ./aitrans
-concurrency 否 并发线程数，默认 3
-max_requests_per_second 否 最大每秒请求数，默认 5（请根据各平台限制调整）
-glossary 否 术语表对象，或设为 "interactive" 表示运行时手动输入（详见下文）
+|参数| 必填 |说明|
+
+|provider |是 |提供商：openai、deepseek、qwen、zhipu。若自定义 api_base 则自动使用自定义端点 |
+
+|api_key |是 |对应平台的 API 密钥 |
+
+|api_base|否 |自定义 API 端点；留空则根据 provider 自动填充默认地址 |
+
+|model |是 |模型名称，例如 gpt-4o、deepseek-chat、qwen-plus、glm-4 |
+
+|source_language |是 |原文语言（写入提示词） |
+
+|target_language |是 |目标语言，同时用于输出文件名 |
+
+|input_file |是 |待翻译文件的路径（支持相对/绝对） |
+
+|output_dir |否 |译文输出目录，默认 ./aitrans |
+
+|concurrency |否 |并发线程数，默认 3 |
+
+|max_requests_per_second |否 |最大每秒请求数，默认 5（请根据各平台限制调整） |
+
+|glossary |否 |术语表对象，或设为 "interactive" 表示运行时手动输入（详见下文） |
+
+
+
 
 默认 API 地址
 
 提供商 默认地址
+
 openai https://api.openai.com/v1
+
 deepseek https://api.deepseek.com/v1
+
 qwen https://dashscope.aliyuncs.com/compatible-mode/v1
+
 zhipu https://open.bigmodel.cn/api/paas/v4
 
 术语表（可选但强烈推荐）
@@ -298,5 +316,3 @@ A：在 config.json 中填写完整的 api_base（必须兼容 OpenAI Chat Compl
 许可与贡献
 
 本项目仅供学习与个人本地化使用。使用前请确保遵守相关游戏的版权规定及 API 提供商的使用条款。欢迎提交 Issue 或 PR 改进工具。
-
-```

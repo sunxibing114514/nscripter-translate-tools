@@ -1,1 +1,0 @@
-# nscripter-translate-tools

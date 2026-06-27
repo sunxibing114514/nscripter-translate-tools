@@ -9,11 +9,10 @@ NScripter 文本提取/注入工具
 import os
 import sys
 import argparse
-from typing import Optional, List, TextIO
+from typing import Optional, List
 
-# ========== NScripter 命令表 ==========
-COMMANDS = {
-    # 原始核心指令
+# ========== 命令加载 ==========
+DEFAULT_COMMANDS = {
     "bg", "ld", "lsp", "lsph", "csp", "vsp", "msp", "print", "tal", "cl",
     "br", "wait", "delay", "goto", "gosub", "return", "if", "else", "endif",
     "for", "next", "break", "continue", "stop", "play", "playonce", "wave",
@@ -27,35 +26,38 @@ COMMANDS = {
     "humanz", "underline", "rlookback", "roff", "rmenu", "menusetwindow",
     "killmenu", "defaultspeed", "windoweffect", "mousecursor", "locate",
     "puttext", "mesbox", "autoclick", "quakex", "quakey", "monocro", "nega",
-    "nsa",                 
-    "clickstr",            
-    "versionstr",      
-    "mp3fadeout",     
-    "game",             
-    "!sd",               
-    "cell",             
-    "spbtn",             
-    "~",             
-    "resettimer",       
-    "blt",              
-    "waittimer",         
-    "jumpb",            
-    "ofscpy",             
-    "clickstr",              
-    "textspeed", "prnum", "spfont", "spstr", "deletescreenshot",
+    "nsa", "clickstr", "versionstr", "mp3fadeout", "game", "!sd", "cell",
+    "spbtn", "~", "resettimer", "blt", "waittimer", "jumpb", "ofscpy",
+    "clickstr", "textspeed", "prnum", "spfont", "spstr", "deletescreenshot",
+    "spi", "savedir", "filelog", "errorsave", "effectcut", "insertmenu",
+    "resetmenu", "textspeeddefault", "bclear", "bcursor", "itoa", "bsp",
+    "bdef", "bexec", "dwave", "dwavestop", "effectskip", "getparam",
+    "amsp", "aspp", "asps", "movl", "mov3", "init", "skip",
 }
+
+def load_commands(filepath: str = "commands.txt") -> set:
+    """从外部文件加载命令列表，每行一个命令。文件不存在时使用默认命令集。"""
+    if not os.path.isfile(filepath):
+        return DEFAULT_COMMANDS.copy()
+    with open(filepath, "r", encoding="utf-8") as f:
+        commands = set()
+        for line in f:
+            cmd = line.strip()
+            if cmd and not cmd.startswith("#"):  # 忽略空行和 # 注释
+                commands.add(cmd.lower())
+        return commands if commands else DEFAULT_COMMANDS.copy()
+
+# 全局命令集，从外部文件读取或回退到默认
+COMMANDS = load_commands("commands.txt")
 
 # ========== 字符串工具 ==========
 def is_command_line(line: str) -> bool:
     trimmed = line.strip()
     if not trimmed:
         return False
-    # 先尝试按空格分割取第一个词（一般情况）
     first_word = trimmed.split()[0].lower()
     if first_word in COMMANDS:
         return True
-    # 处理命令后紧跟引号、括号等无空格的情况
-    # 遍历已知命令，检查 trimmed 是否以该命令开头，并且命令后的第一个字符不是字母或数字（或者就是字符串结尾）
     lower_line = trimmed.lower()
     for cmd in COMMANDS:
         if lower_line.startswith(cmd) and (len(trimmed) == len(cmd) or not trimmed[len(cmd)].isalnum()):
@@ -108,29 +110,24 @@ def apply_expand(content: str) -> str:
 def process_script_line(line: str, expand_symbols: bool = False) -> Optional[ScriptText]:
     """处理一行 NScripter 脚本，若为可翻译文本则返回 ScriptText，否则返回 None"""
     trimmed = line.rstrip('\n\r')
-    # 跳过空行、注释、标签
     if not trimmed or trimmed[0] in (';', '*'):
         return None
 
-    # 反引号行
     if trimmed.startswith('`'):
         content = trimmed[1:]
         if expand_symbols:
             content = apply_expand(content)
         return ScriptText(TextType.BACKTICK, content)
 
-    # 双引号行
     if trimmed.startswith('"'):
         content = extract_quoted_string(trimmed)
         if expand_symbols:
             content = apply_expand(content)
         return ScriptText(TextType.QUOTED, content)
 
-    # br 命令本身不是文本
     if trimmed.lower() == 'br':
         return None
 
-    # 非命令行作为普通文本
     if not is_command_line(trimmed):
         content = trimmed
         if expand_symbols:
@@ -141,7 +138,6 @@ def process_script_line(line: str, expand_symbols: bool = False) -> Optional[Scr
 
 # ========== 核心功能 ==========
 def do_extract(input_path: str, out_dir: str, in_enc: str, out_enc: str, expand: bool):
-    """提取脚本中的文本并写入输出目录"""
     with open(input_path, 'r', encoding=in_enc) as f:
         lines = f.readlines()
 
@@ -164,14 +160,12 @@ def do_extract(input_path: str, out_dir: str, in_enc: str, out_enc: str, expand:
 
 def do_inject(input_path: str, trans_path: str, out_dir: str,
               in_enc: str, out_enc: str, trans_enc: str):
-    """将翻译文件注入原始脚本并写入输出目录"""
     with open(input_path, 'r', encoding=in_enc) as f:
         script_lines = f.readlines()
 
     with open(trans_path, 'r', encoding=trans_enc) as f:
         trans_lines = [line.rstrip('\n\r') for line in f if line.strip()]
 
-    # 解析翻译文件行
     trans_items: List[ScriptText] = []
     for tline in trans_lines:
         if len(tline) < 2 or tline[1] != ':':
@@ -184,7 +178,7 @@ def do_inject(input_path: str, trans_path: str, out_dir: str,
     output = []
     trans_idx = 0
     for line in script_lines:
-        orig_text = process_script_line(line, expand_symbols=False)  # 注入时不展开
+        orig_text = process_script_line(line, expand_symbols=False)
         if orig_text:
             if trans_idx >= len(trans_items):
                 raise RuntimeError("More translatable lines in script than translation entries")
@@ -195,11 +189,10 @@ def do_inject(input_path: str, trans_path: str, out_dir: str,
                 new_line = f"`{repl.content}\n"
             elif repl.type == TextType.QUOTED:
                 new_line = f'"{repl.content}"\n'
-            else:  # TEXT
+            else:
                 new_line = repl.content + '\n'
             output.append(new_line)
         else:
-            # 保留原始行（包括换行符）
             output.append(line if line.endswith('\n') else line + '\n')
 
     if trans_idx != len(trans_items):
@@ -223,15 +216,13 @@ def main():
     )
     sub = parser.add_subparsers(dest='mode', required=True, help="操作模式")
 
-    # extract 子命令
     ext = sub.add_parser('extract', help='提取文本')
     ext.add_argument('input', help='输入 NScripter 脚本')
-    ext.add_argument('--in-encoding', default='utf8', help='输入脚本编码 (默认: utf8)')
+    ext.add_argument('--in-encoding', default='shift-jis', help='输入脚本编码 (默认: utf8)')
     ext.add_argument('--out-encoding', default='utf8', help='输出翻译文件编码 (默认: utf8)')
     ext.add_argument('--out-dir', default='out', help='输出目录 (默认: out)')
     ext.add_argument('--expand', action='store_true', help='将 @ 和 ¥ 转换为换行符')
 
-    # inject 子命令
     inj = sub.add_parser('inject', help='注入翻译')
     inj.add_argument('input', help='原始 NScripter 脚本')
     inj.add_argument('trans', help='翻译文件 (由 extract 生成)')

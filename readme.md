@@ -25,6 +25,7 @@ nscript/
 ├── fix_slashes.py       # 修复符号缺失错误
 ├── readme.md            # 本文件
 └── translate.py         # LLM 批量翻译脚本
+└── dat.py               # dat文件解封包
 
 ```
 

@@ -61,6 +61,8 @@ def load_config(config_path="config.json"):
     config.setdefault("concurrency", 3)
     config.setdefault("max_requests_per_second", 5)
     config.setdefault("output_dir", "./aitrans")
+    config.setdefault("max_retries", 3)  # 添加重试次数配置
+    config.setdefault("retry_delay", 2)  # 添加重试延迟配置
     # 术语表：支持直接提供字典，或设为 "interactive" 后手动输入
     config.setdefault("glossary", {})
     if config["glossary"] == "interactive":
@@ -124,32 +126,102 @@ def build_prompt(source_lang, target_lang, glossary=None):
 </textarea>"""
     return base_prompt
 
-# ---------------------------- 单行翻译调用 ----------------------------
-def translate_single_line(api_base, api_key, model, line, system_prompt, line_number, rate_limiter):
-    rate_limiter.wait()
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json"
-    }
-    user_message = f"请翻译以下单行文本：\n{line}"
-    payload = {
-        "model": model,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_message}
-        ],
-        "temperature": 0.1,
-        "max_tokens": 200
-    }
-    logger.info(f"--- 翻译第 {line_number} 行 ---")
-    logger.info(f"发送原文：{line}")
-    url = api_base.rstrip("/") + "/chat/completions"
-    response = requests.post(url, headers=headers, json=payload, timeout=120)
-    response.raise_for_status()
-    result = response.json()
-    content = result["choices"][0]["message"]["content"]
-    logger.info(f"AI 原始响应 (第 {line_number} 行)：{content}")
-    return line_number, line, content
+# ---------------------------- 单行翻译调用（带重试机制）---------------------------
+def translate_single_line(api_base, api_key, model, line, system_prompt, line_number, rate_limiter, max_retries=3, retry_delay=2):
+    """
+    翻译单行文本，带重试机制
+    
+    Args:
+        max_retries: 最大重试次数
+        retry_delay: 重试间隔（秒）
+    """
+    for attempt in range(max_retries + 1):
+        try:
+            rate_limiter.wait()
+            headers = {
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json"
+            }
+            user_message = f"请翻译以下单行文本：\n{line}"
+            payload = {
+                "model": model,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_message}
+                ],
+                "temperature": 0.1,
+                "max_tokens": 200
+            }
+            logger.info(f"--- 翻译第 {line_number} 行 (尝试 {attempt + 1}/{max_retries + 1}) ---")
+            logger.info(f"发送原文：{line}")
+            url = api_base.rstrip("/") + "/chat/completions"
+            
+            response = requests.post(url, headers=headers, json=payload, timeout=120)
+            
+            # 检查 HTTP 状态码
+            if response.status_code == 500:
+                error_msg = f"第 {line_number} 行，服务器内部错误 (500)，尝试 {attempt + 1}/{max_retries + 1}"
+                logger.error(error_msg)
+                if attempt < max_retries:
+                    wait_time = retry_delay * (2 ** attempt)  # 指数退避
+                    logger.info(f"等待 {wait_time} 秒后重试...")
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    raise Exception(f"第 {line_number} 行翻译失败，已重试 {max_retries} 次: 服务器内部错误")
+            
+            elif response.status_code == 429:
+                error_msg = f"第 {line_number} 行，请求频率过高 (429)，尝试 {attempt + 1}/{max_retries + 1}"
+                logger.warning(error_msg)
+                if attempt < max_retries:
+                    wait_time = retry_delay * (3 ** attempt)  # 更长的退避时间
+                    logger.info(f"等待 {wait_time} 秒后重试...")
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    raise Exception(f"第 {line_number} 行翻译失败，已重试 {max_retries} 次: 请求频率过高")
+            
+            # 其他非 2xx 状态码
+            response.raise_for_status()
+            
+            # 成功获取响应
+            result = response.json()
+            content = result["choices"][0]["message"]["content"]
+            logger.info(f"AI 原始响应 (第 {line_number} 行)：{content}")
+            return line_number, line, content
+            
+        except requests.exceptions.Timeout as e:
+            error_msg = f"第 {line_number} 行，请求超时，尝试 {attempt + 1}/{max_retries + 1}: {e}"
+            logger.error(error_msg)
+            if attempt < max_retries:
+                wait_time = retry_delay * (2 ** attempt)
+                logger.info(f"等待 {wait_time} 秒后重试...")
+                time.sleep(wait_time)
+            else:
+                logger.error(f"第 {line_number} 行翻译最终失败: 请求超时")
+                return line_number, line, "[翻译失败: 请求超时]"
+                
+        except requests.exceptions.ConnectionError as e:
+            error_msg = f"第 {line_number} 行，连接错误，尝试 {attempt + 1}/{max_retries + 1}: {e}"
+            logger.error(error_msg)
+            if attempt < max_retries:
+                wait_time = retry_delay * (2 ** attempt)
+                logger.info(f"等待 {wait_time} 秒后重试...")
+                time.sleep(wait_time)
+            else:
+                logger.error(f"第 {line_number} 行翻译最终失败: 连接错误")
+                return line_number, line, "[翻译失败: 连接错误]"
+                
+        except Exception as e:
+            error_msg = f"第 {line_number} 行，未知错误，尝试 {attempt + 1}/{max_retries + 1}: {e}"
+            logger.error(error_msg)
+            if attempt < max_retries:
+                wait_time = retry_delay * (2 ** attempt)
+                logger.info(f"等待 {wait_time} 秒后重试...")
+                time.sleep(wait_time)
+            else:
+                logger.error(f"第 {line_number} 行翻译最终失败: {e}")
+                return line_number, line, f"[翻译失败: {str(e)}]"
 
 # ---------------------------- 译文提取 ----------------------------
 def extract_translation_from_line(response_text, line_number):
@@ -205,11 +277,13 @@ def main():
         output_dir = config["output_dir"]
         concurrency = config["concurrency"]
         max_rps = config["max_requests_per_second"]
+        max_retries = config.get("max_retries", 3)
+        retry_delay = config.get("retry_delay", 2)
         glossary = config["glossary"]  # 可能是字典，也可能是 {}
 
         original_lines = read_lines(input_file)
         total = len(original_lines)
-        logger.info(f"共 {total} 行，开始并发翻译 (并发数={concurrency}, 最大请求速率={max_rps}/s)")
+        logger.info(f"共 {total} 行，开始并发翻译 (并发数={concurrency}, 最大请求速率={max_rps}/s, 最大重试次数={max_retries})")
 
         # 构建包含术语表的系统提示词
         system_prompt = build_prompt(source_lang, target_lang, glossary)
@@ -222,24 +296,47 @@ def main():
             tasks.append((idx, line))
 
         translated_lines = [""] * total
+        failed_lines = []  # 记录翻译失败的行
+        
         with ThreadPoolExecutor(max_workers=concurrency) as executor:
             futures = {
                 executor.submit(
                     translate_single_line,
-                    api_base, api_key, model, line, system_prompt, line_number, rate_limiter
+                    api_base, api_key, model, line, system_prompt, line_number, 
+                    rate_limiter, max_retries, retry_delay
                 ): line_number
                 for line_number, line in tasks
             }
+            
             for future in as_completed(futures):
-                line_number, original_line, raw_response = future.result()
-                translated = extract_translation_from_line(raw_response, line_number)
-                translated_lines[line_number - 1] = translated
+                try:
+                    line_number, original_line, raw_response = future.result()
+                    translated = extract_translation_from_line(raw_response, line_number)
+                    translated_lines[line_number - 1] = translated
+                    
+                    # 检查是否是失败标记
+                    if translated.startswith("[翻译失败"):
+                        failed_lines.append(line_number)
+                        logger.warning(f"第 {line_number} 行翻译失败，已标记")
+                        
+                except Exception as e:
+                    line_number = futures[future]
+                    logger.error(f"第 {line_number} 行处理异常: {e}")
+                    translated_lines[line_number - 1] = f"[翻译失败: {str(e)}]"
+                    failed_lines.append(line_number)
 
+        # 保留空行
         for idx, line in enumerate(original_lines, start=1):
             if not line.strip():
                 translated_lines[idx - 1] = ""
 
         save_translation(translated_lines, input_file, target_lang, output_dir)
+        
+        # 输出失败统计
+        if failed_lines:
+            logger.warning(f"翻译完成，但有 {len(failed_lines)} 行失败: {failed_lines}")
+        else:
+            logger.info("所有行翻译成功！")
 
     except Exception as e:
         logger.exception("翻译过程中出现异常")

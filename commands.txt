@@ -1,4 +1,5 @@
 %
+playstop
 flushout
 #ffffff
 #8B0000

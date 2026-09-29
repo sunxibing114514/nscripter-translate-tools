@@ -41,7 +41,8 @@ jobs:
           fi
           if [ -f android/build.gradle.kts ]; then
             root_gradle=android/build.gradle.kts
-            extra=$'subprojects {\n    afterEvaluate { p ->\n        if (p.plugins.hasPlugin("com.android.library")) {\n            p.android {\n                compileSdk 36\n            }\n        }\n    }\n}\n'
+            # Kotlin DSL：用反射设置 compileSdk，避免依赖 root 脚本 classpath 上的 AGP 类型
+            extra=$'subprojects {\n    afterEvaluate {\n        val android = extensions.findByName("android")\n        if (android != null) {\n            for (n in listOf("setCompileSdk", "setCompileSdkVersion")) {\n                val m = android.javaClass.methods.firstOrNull { it.name == n && it.parameterCount == 1 && it.parameterTypes[0] == Int::class.java }\n                if (m != null) { m.invoke(android, 36); break }\n            }\n        }\n    }\n}\n'
           else
             root_gradle=android/build.gradle
             extra=$'subprojects {\n    afterEvaluate { p ->\n        if (p.hasProperty("android")) {\n            p.android {\n                compileSdkVersion 36\n            }\n        }\n    }\n}\n'

@@ -50,8 +50,8 @@ const List<String> _rawCommands = [
   'waveloop', 'wavestop', 'windoweffect', 'windowback',
 ];
 
-/// 默认命令集。
-const Set<String> defaultCommands = <String>{..._rawCommands};
+/// 默认命令集（运行时去重，避免 const 集合元素重复报错）。
+final Set<String> defaultCommands = <String>{..._rawCommands};
 
 /// 从文本内容加载命令集：每行一个命令，忽略空行与 # 注释。
 /// 返回空集合时回退到 [defaultCommands]。

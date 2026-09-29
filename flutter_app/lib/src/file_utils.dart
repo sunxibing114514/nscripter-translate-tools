@@ -17,6 +17,14 @@ Uint8List _bytesOf(PlatformFile f) {
   throw StateError('无法读取所选文件内容（无路径且未携带数据）');
 }
 
+/// 根据是否提供 [extensions] 推断合适的 [FileType]。
+/// file_picker 8.x 要求：仅当 type=FileType.custom 时才能携带 allowedExtensions，
+/// 否则选择框/保存框直接抛 ArgumentError。空扩展名则退回 FileType.any。
+FileType _resolveType(FileType type, List<String>? extensions) {
+  if (extensions != null && extensions.isNotEmpty) return FileType.custom;
+  return type;
+}
+
 /// 弹出文件选择框并直接读取字节，返回 (文件名, 字节)。
 /// 取消时返回 null。失败时抛出异常。
 Future<(String, Uint8List)?> pickFileBytes({
@@ -24,7 +32,7 @@ Future<(String, Uint8List)?> pickFileBytes({
   FileType type = FileType.any,
 }) async {
   final result = await FilePicker.platform.pickFiles(
-    type: type,
+    type: _resolveType(type, extensions),
     allowedExtensions: extensions,
     withData: true,
   );
@@ -36,7 +44,10 @@ Future<(String, Uint8List)?> pickFileBytes({
 /// 弹出文件选择框，返回选中文件的绝对路径（取消返回 null）。
 /// Android 上若系统返回 content:// URI 而无真实路径，将抛出异常提示。
 Future<String?> pickFile({List<String>? extensions, FileType type = FileType.any}) async {
-  final result = await FilePicker.platform.pickFiles(type: type, allowedExtensions: extensions);
+  final result = await FilePicker.platform.pickFiles(
+    type: _resolveType(type, extensions),
+    allowedExtensions: extensions,
+  );
   if (result == null || result.files.isEmpty) return null;
   final p = result.files.single.path;
   if (p == null) throw StateError('所选文件没有可访问路径');

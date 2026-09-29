@@ -29,6 +29,16 @@ jobs:
         working-directory: flutter_app
         run: flutter create --org com.nscript --project-name nscript_translate_tools --platforms android .
 
+      # 部分插件(flutter_plugin_android_lifecycle)要求 compileSdk>=36，默认模板可能是34，强制提升到36
+      - name: Force compileSdk 36
+        working-directory: flutter_app
+        shell: bash
+        run: |
+          gradle="android/app/build.gradle"
+          [[ -f "android/app/build.gradle.kts" ]] && gradle="android/app/build.gradle.kts"
+          sed -i 's/flutter\.compileSdkVersion/36/' "$gradle"
+          grep -nE "compileSdk" "$gradle" || true
+
       - name: Install dependencies
         working-directory: flutter_app
         run: flutter pub get

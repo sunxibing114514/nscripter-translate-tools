@@ -15,32 +15,42 @@ class FixSlashesScreen extends StatefulWidget {
 }
 
 class _FixSlashesScreenState extends State<FixSlashesScreen> {
-  String? _origPath;
-  String? _transPath;
+  Uint8List? _origBytes;
+  Uint8List? _transBytes;
   String _encoding = 'utf8';
   Uint8List _result = Uint8List(0);
   String _status = '选择原文与翻译文件后运行';
 
   Future<void> _pickOriginal() async {
-    final p = await pickFile(extensions: ['txt']);
-    if (p != null) setState(() => _origPath = p);
+    try {
+      final picked = await pickFileBytes(extensions: ['txt']);
+      if (picked == null) return;
+      final (_, bytes) = picked;
+      setState(() => _origBytes = bytes);
+    } catch (e) {
+      _showSnack('选择失败：$e');
+    }
   }
 
   Future<void> _pickTrans() async {
-    final p = await pickFile(extensions: ['txt']);
-    if (p != null) setState(() => _transPath = p);
+    try {
+      final picked = await pickFileBytes(extensions: ['txt']);
+      if (picked == null) return;
+      final (_, bytes) = picked;
+      setState(() => _transBytes = bytes);
+    } catch (e) {
+      _showSnack('选择失败：$e');
+    }
   }
 
   Future<void> _run() async {
-    if (_origPath == null || _transPath == null) {
+    if (_origBytes == null || _transBytes == null) {
       _showSnack('请选择原文与翻译文件');
       return;
     }
     try {
-      final origBytes = await readBytes(_origPath!);
-      final transBytes = await readBytes(_transPath!);
-      final orig = decodeBytes(origBytes, _encoding);
-      final trans = decodeBytes(transBytes, _encoding);
+      final orig = decodeBytes(_origBytes!, _encoding);
+      final trans = decodeBytes(_transBytes!, _encoding);
       final out = fixMissingSlashes(orig, trans);
       setState(() {
         _result = encodeString(out, _encoding);
@@ -77,7 +87,7 @@ class _FixSlashesScreenState extends State<FixSlashesScreen> {
           Card(
             child: ListTile(
               leading: const Icon(Icons.description_outlined),
-              title: Text(_origPath ?? '原文文件（未提取的脚本）'),
+              title: Text(_origBytes == null ? '原文文件（未提取的脚本）' : '原文文件（已选择）'),
               onTap: _pickOriginal,
             ),
           ),
@@ -85,7 +95,7 @@ class _FixSlashesScreenState extends State<FixSlashesScreen> {
           Card(
             child: ListTile(
               leading: const Icon(Icons.inventory_2_outlined),
-              title: Text(_transPath ?? '翻译后文件'),
+              title: Text(_transBytes == null ? '翻译后文件' : '翻译后文件（已选择）'),
               onTap: _pickTrans,
             ),
           ),

@@ -36,6 +36,8 @@ class _TranslateScreenState extends State<TranslateScreen> {
 
   String? _inputPath;
   final _inputCtrl = TextEditingController();
+  Uint8List? _inputBytes;
+  String? _inputName;
   Uint8List _results = Uint8List(0);
   String _outputName = '';
 
@@ -91,11 +93,13 @@ class _TranslateScreenState extends State<TranslateScreen> {
 
   Future<void> _pickInput() async {
     try {
-      final path = await pickFile(extensions: ['txt']);
-      if (path == null) return;
-      _inputCtrl.text = path;
+      final picked = await pickFileBytes(extensions: ['txt']);
+      if (picked == null) return;
+      final (name, bytes) = picked;
+      _inputBytes = bytes;
+      _inputName = name;
+      _inputCtrl.text = _inputCtrl.text.isEmpty ? name : _inputCtrl.text;
       setState(() {
-        _inputPath = path;
         _results = Uint8List(0);
       });
     } catch (e) {
@@ -122,18 +126,26 @@ class _TranslateScreenState extends State<TranslateScreen> {
       _engine.cancel();
       return;
     }
-    var input = _inputPath;
-    if (_inputCtrl.text.trim().isNotEmpty) input = _inputCtrl.text.trim();
-    if (input == null) {
-      _showSnack('请先选择待翻译的输入文件');
-      return;
+    Uint8List bytes;
+    String base;
+    if (_inputBytes != null) {
+      bytes = _inputBytes!;
+      base = _inputName ?? 'input.txt';
+    } else {
+      var input = _inputPath;
+      if (_inputCtrl.text.trim().isNotEmpty) input = _inputCtrl.text.trim();
+      if (input == null) {
+        _showSnack('请先选择待翻译的输入文件');
+        return;
+      }
+      base = input.split('/').last;
+      bytes = await readBytes(input);
     }
     if (_apiKey.text.trim().isEmpty) {
       _showSnack('请填写 API Key');
       return;
     }
     try {
-      final bytes = await readBytes(input);
       final source = utf8.decode(bytes, allowMalformed: true);
       final lines =
           source.trimRight().split('\n').map((l) => l.replaceAll('\r', '')).toList();
@@ -151,7 +163,6 @@ class _TranslateScreenState extends State<TranslateScreen> {
       );
 
       // 输出文件名：原文件名_目标语言.txt
-      final base = input.split('/').last;
       final dot = base.lastIndexOf('.');
       final name = dot == -1 ? base : base.substring(0, dot);
       final ext = dot == -1 ? '' : base.substring(dot);
@@ -344,7 +355,7 @@ class _TranslateScreenState extends State<TranslateScreen> {
           label: '待翻译输入文件 (.txt)',
           controller: _inputCtrl,
           hint: '由“文本提取”生成的文件；可点浏览或粘贴路径',
-          pick: () => pickFile(extensions: ['txt']),
+          browse: _pickInput,
         ),
         const SizedBox(height: 8),
         DropdownButtonFormField<String>(

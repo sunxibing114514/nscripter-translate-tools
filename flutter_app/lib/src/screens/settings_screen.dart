@@ -1,13 +1,13 @@
 import 'package:flutter/material.dart';
 
-import '../commands.dart';
 import '../file_utils.dart';
 import '../settings.dart';
 
-/// 设置界面：项目文件夹(nstran 目录)、翻译 API、术语表、命令集。
+/// 设置界面：主题、项目文件夹(nstran 目录)、翻译 API、术语表、命令集。
 class SettingsScreen extends StatefulWidget {
   final AppSettings settings;
-  const SettingsScreen({super.key, required this.settings});
+  final ValueChanged<ThemeMode>? onThemeChanged;
+  const SettingsScreen({super.key, required this.settings, this.onThemeChanged});
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -22,7 +22,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
   late final TextEditingController _concurrencyCtrl;
   late final TextEditingController _maxRpsCtrl;
   late final TextEditingController _glossary;
+  late final TextEditingController _commandsCtrl;
+  late final TextEditingController _folderCtrl;
   late String _provider;
+  late ThemeMode _themeMode;
 
   String? _projectFolder;
   bool _showApiKey = false;
@@ -32,6 +35,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
     super.initState();
     final s = widget.settings;
     _projectFolder = s.projectFolder;
+    _folderCtrl = TextEditingController();
+    if (_projectFolder != null) _folderCtrl.text = _projectFolder!;
+    _themeMode = s.themeMode;
+    _commandsCtrl = TextEditingController(text: _commandsToString(s));
     _provider = s.provider;
     _apiKey = TextEditingController(text: s.apiKey);
     _apiBase = TextEditingController(text: s.apiBase);
@@ -53,11 +60,35 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _concurrencyCtrl.dispose();
     _maxRpsCtrl.dispose();
     _glossary.dispose();
+    _commandsCtrl.dispose();
+    _folderCtrl.dispose();
     super.dispose();
   }
 
   String _glossaryToString(Map<String, String> g) =>
       g.entries.map((e) => '${e.key}=${e.value}').join('\n');
+
+  /// 把当前命令集展示为每行一条的文本。
+  String _commandsToString(AppSettings s) {
+    final set = s.activeCommands().toList()..sort();
+    return set.join('\n');
+  }
+
+  /// 把每行一条的命令文本保存为自定义命令集。
+  void _saveCommandsFromText() {
+    final lines = _commandsCtrl.text
+        .split('\n')
+        .map((l) => l.trim())
+        .where((l) => l.isNotEmpty)
+        .toSet();
+    if (lines.isEmpty) {
+      widget.settings.customCommands = null;
+      _showSnack('命令集已清空（恢复默认）');
+    } else {
+      widget.settings.customCommands = lines.join('\n');
+      _showSnack('已保存 ${lines.length} 条自定义命令');
+    }
+  }
 
   Map<String, String> _parseGlossary() {
     final map = <String, String>{};
@@ -75,12 +106,35 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _pickProjectFolder() async {
-    final path = await pickFolder();
-    if (path == null) return;
-    setState(() => _projectFolder = path);
-    widget.settings.projectFolder = path;
+    try {
+      final path = await pickFolder();
+      if (path == null) return;
+      _folderCtrl.text = path;
+      setState(() => _projectFolder = path);
+      widget.settings.projectFolder = path;
+      await widget.settings.ensureNstranFolder();
+      _showSnack('已设置项目文件夹，并在其中创建 $nstranDirName 目录');
+    } catch (e) {
+      _showSnack('选择失败：$e，可手动输入路径');
+    }
+  }
+
+  Future<void> _saveProjectFolderFromText() async {
+    final manual = _folderCtrl.text.trim();
+    if (manual.isEmpty) {
+      _showSnack('请输入项目文件夹路径');
+      return;
+    }
+    setState(() => _projectFolder = manual);
+    widget.settings.projectFolder = manual;
     await widget.settings.ensureNstranFolder();
     _showSnack('已设置项目文件夹，并在其中创建 $nstranDirName 目录');
+  }
+
+  void _setTheme(ThemeMode m) {
+    setState(() => _themeMode = m);
+    widget.settings.themeMode = m;
+    widget.onThemeChanged?.call(m);
   }
 
   void _saveGlossaryAndTranslateConfig() {
@@ -97,22 +151,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _showSnack('翻译配置与术语表已保存');
   }
 
-  Future<void> _saveCommands() async {
-    final path = await pickFile(extensions: ['txt']);
-    if (path == null) return;
-    final content = String.fromCharCodes(await readBytes(path));
-    final parsed = parseCommandsFile(content);
-    widget.settings.customCommands = content;
-    _showSnack('已导入命令集，共 ${parsed.length} 条');
-  }
-
-  void _resetCommands() {
-    widget.settings.customCommands = null;
-    _showSnack('已恢复为默认命令集');
-  }
-
-  bool get _hasCommands => widget.settings.customCommands != null;
-
   void _showSnack(String msg) {
     if (!mounted) return;
     ScaffoldMessenger.of(context)
@@ -126,20 +164,57 @@ class _SettingsScreenState extends State<SettingsScreen> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          _sectionTitle('主题'),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  RadioListTile<ThemeMode>(
+                    value: ThemeMode.system,
+                    groupValue: _themeMode,
+                    title: const Text('跟随系统'),
+                    onChanged: (v) => _setTheme(ThemeMode.system),
+                  ),
+                  RadioListTile<ThemeMode>(
+                    value: ThemeMode.light,
+                    groupValue: _themeMode,
+                    title: const Text('浅色'),
+                    onChanged: (v) => _setTheme(ThemeMode.light),
+                  ),
+                  RadioListTile<ThemeMode>(
+                    value: ThemeMode.dark,
+                    groupValue: _themeMode,
+                    title: const Text('深色'),
+                    onChanged: (v) => _setTheme(ThemeMode.dark),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 20),
+
           _sectionTitle('项目文件夹'),
           Card(
-            child: ListTile(
-              leading: const Icon(Icons.folder),
-              title: Text(_projectFolder == null
-                  ? '选择项目文件夹'
-                  : '$_projectFolder/$nstranDirName'),
-              subtitle: Text(
-                _projectFolder == null
-                    ? '生成的提取/翻译等文件将存放在其 nstran 子目录'
-                    : '自动创建 $nstranDirName 目录存放生成的文件',
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  PathField(
+                    label: '项目文件夹路径',
+                    controller: _folderCtrl,
+                    hint: '点击“浏览”或在此粘贴绝对路径',
+                    pick: pickFolder,
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    '保存后将在其中自动创建 $nstranDirName 目录，存放提取/翻译等生成文件。',
+                    style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                  ),
+                ],
               ),
-              trailing: const Icon(Icons.folder_open),
-              onTap: _pickProjectFolder,
             ),
           ),
           const SizedBox(height: 20),
@@ -270,30 +345,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    _hasCommands
-                        ? '当前使用自定义命令集'
-                        : '当前使用内置默认命令集',
-                    style: const TextStyle(fontWeight: FontWeight.w600),
+                  TextField(
+                    controller: _commandsCtrl,
+                    minLines: 6,
+                    maxLines: 12,
+                    style: const TextStyle(fontSize: 13),
+                    decoration: const InputDecoration(
+                        hintText: '每行一条命令，例如：\nmono\ngoto\nlua\nbmp\nbgm\n语音',
+                        border: OutlineInputBorder()),
                   ),
-                  const SizedBox(height: 4),
+                  const SizedBox(height: 8),
                   Text(
-                    '用于提取/注入时识别命令行。导入外部 commands.txt 或恢复默认。',
+                    '用于提取/注入时识别命令行。可直接在框内增删命令（每行一条），保存后立即生效。留空保存则恢复内置默认。',
                     style: TextStyle(fontSize: 12, color: Colors.grey[600]),
                   ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 8),
                   Row(
                     children: [
                       OutlinedButton.icon(
-                        onPressed: _saveCommands,
-                        icon: const Icon(Icons.import_export),
-                        label: const Text('导入命令集'),
-                      ),
-                      const SizedBox(width: 8),
-                      OutlinedButton.icon(
-                        onPressed: _hasCommands ? _resetCommands : null,
-                        icon: const Icon(Icons.restart_alt),
-                        label: const Text('恢复默认'),
+                        onPressed: _saveCommandsFromText,
+                        icon: const Icon(Icons.check),
+                        label: const Text('保存命令集'),
                       ),
                     ],
                   ),
@@ -303,9 +375,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           const SizedBox(height: 24),
           FilledButton.icon(
-            onPressed: _saveGlossaryAndTranslateConfig,
+            onPressed: () {
+              _saveCommandsFromText();
+              _saveProjectFolderFromText();
+              widget.settings.themeMode = _themeMode;
+              _saveGlossaryAndTranslateConfig();
+            },
             icon: const Icon(Icons.save),
-            label: const Text('保存设置'),
+            label: const Text('保存全部设置'),
           ),
         ],
       ),

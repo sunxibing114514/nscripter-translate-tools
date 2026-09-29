@@ -11,7 +11,8 @@ import 'translate_screen.dart';
 
 class HomeScreen extends StatelessWidget {
   final AppSettings settings;
-  const HomeScreen({super.key, required this.settings});
+  final ValueChanged<ThemeMode>? onThemeChanged;
+  const HomeScreen({super.key, required this.settings, this.onThemeChanged});
 
   @override
   Widget build(BuildContext context) {
@@ -28,8 +29,11 @@ class HomeScreen extends StatelessWidget {
           () => Navigator.push(context, MaterialPageRoute(builder: (_) => DatScreen()))),
       _Tool('命令集', '查看 / 导入 NScripter 命令表', Icons.list_alt_outlined,
           () => Navigator.push(context, MaterialPageRoute(builder: (_) => CommandsScreen(settings: settings)))),
-      _Tool('设置', '项目文件夹 / API / 术语表 / 命令集', Icons.settings_outlined,
-          () => Navigator.push(context, MaterialPageRoute(builder: (_) => SettingsScreen(settings: settings)))),
+      _Tool('设置', '主题 / 项目文件夹 / API / 术语表 / 命令集', Icons.settings_outlined,
+          () => Navigator.push(context, MaterialPageRoute(builder: (_) => SettingsScreen(
+                settings: settings,
+                onThemeChanged: onThemeChanged,
+              )))),
     ];
 
     return Scaffold(

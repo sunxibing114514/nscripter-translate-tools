@@ -4,6 +4,8 @@ library;
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/material.dart' show ThemeMode;
+
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'commands.dart';
@@ -23,6 +25,7 @@ class AppSettings {
   static const _kGlossary = 'glossary';
   static const _kCustomCommands = 'custom_commands';
   static const _kProjectFolder = 'project_folder';
+  static const _kThemeMode = 'theme_mode';
 
   final SharedPreferences _prefs;
   AppSettings._(this._prefs);
@@ -98,6 +101,24 @@ class AppSettings {
     if (nf == null) return null;
     await Directory(nf).create(recursive: true);
     return nf;
+  }
+
+  // ---- 主题（默认跟随系统） ----
+  ThemeMode get themeMode {
+    final v = _prefs.getString(_kThemeMode);
+    switch (v) {
+      case 'light':
+        return ThemeMode.light;
+      case 'dark':
+        return ThemeMode.dark;
+      default:
+        return ThemeMode.system;
+    }
+  }
+
+  set themeMode(ThemeMode m) {
+    _prefs.setString(
+        _kThemeMode, switch (m) { ThemeMode.light => 'light', ThemeMode.dark => 'dark', _ => 'system' });
   }
 
   // ---- 自定义命令集 ----

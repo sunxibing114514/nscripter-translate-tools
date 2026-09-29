@@ -7,14 +7,16 @@ import 'dart:typed_data';
 import 'package:file_picker/file_picker.dart';
 import 'package:path_provider/path_provider.dart' as pp;
 
-/// 弹出文件选择框，返回选中文件的绝对路径（取消时返回 null）。
+/// 弹出文件选择框，返回选中文件的绝对路径（取消返回 null，异常时抛出提示）。
 Future<String?> pickFile({List<String>? extensions, FileType type = FileType.any}) async {
   final result = await FilePicker.platform.pickFiles(type: type, allowedExtensions: extensions);
   if (result == null || result.files.isEmpty) return null;
-  return result.files.single.path;
+  final p = result.files.single.path;
+  if (p == null) throw StateError('所选文件没有可访问路径');
+  return p;
 }
 
-/// 弹出文件夹选择框，返回选中文件夹的绝对路径（取消时返回 null）。
+/// 弹出文件夹选择框，返回选中文件夹的绝对路径（取消返回 null）。
 Future<String?> pickFolder() async {
   final selected = await FilePicker.platform.getDirectoryPath();
   return selected;

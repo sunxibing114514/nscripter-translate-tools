@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../dat.dart';
 import '../file_utils.dart';
+import '../widgets.dart';
 
 class DatScreen extends StatefulWidget {
   const DatScreen({super.key});
@@ -13,14 +14,25 @@ class DatScreen extends StatefulWidget {
 }
 
 class _DatScreenState extends State<DatScreen> {
+  late final TextEditingController _pathCtrl;
   String? _path;
   Uint8List _result = Uint8List(0);
   String _status = '选择 nscript.dat 或 nscript.txt';
   String _mode = '';
 
-  Future<void> _pick() async {
-    final p = await pickFile(extensions: ['dat', 'txt']);
-    if (p == null) return;
+  @override
+  void initState() {
+    super.initState();
+    _pathCtrl = TextEditingController();
+  }
+
+  @override
+  void dispose() {
+    _pathCtrl.dispose();
+    super.dispose();
+  }
+
+  void _applyPath(String p) {
     setState(() {
       _path = p;
       _result = Uint8List(0);
@@ -35,6 +47,7 @@ class _DatScreenState extends State<DatScreen> {
   }
 
   Future<void> _run() async {
+    if (_pathCtrl.text.trim().isNotEmpty) _path = _pathCtrl.text.trim();
     if (_path == null) return;
     try {
       final bytes = await readBytes(_path!);
@@ -76,20 +89,25 @@ class _DatScreenState extends State<DatScreen> {
               style: TextStyle(color: Colors.grey, fontSize: 13),
             ),
           ),
-          Card(
-            child: ListTile(
-              leading: const Icon(Icons.file_open_outlined),
-              title: Text(_path ?? '选择文件'),
-              trailing: _mode.isEmpty ? null : Chip(label: Text(_mode)),
-              onTap: _pick,
-            ),
+          PathField(
+            label: '文件路径（nscript.dat / nscript.txt）',
+            controller: _pathCtrl,
+            hint: '点击“浏览”或在此粘贴绝对路径',
+            pick: () => pickFile(extensions: ['dat', 'txt']),
           ),
+          if (_path != null) ...[
+            const SizedBox(height: 8),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Chip(label: Text(_mode.isEmpty ? '已选择' : _mode)),
+            ),
+          ],
           const SizedBox(height: 16),
           Row(
             children: [
               Expanded(
                 child: FilledButton.icon(
-                  onPressed: _path == null ? null : _run,
+                  onPressed: _run,
                   icon: const Icon(Icons.play_arrow),
                   label: const Text('运行'),
                 ),

@@ -1,0 +1,21 @@
+# Flutter generated artifacts
+.dart_tool/
+.packages
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+*.iml
+.idea/
+.gradle/
+local.properties
+
+# Android (由 CI 的 flutter create 生成)
+android/
+ios/
+web/
+windows/
+macos/
+linux/
+
+# Pub
+pubspec.lock

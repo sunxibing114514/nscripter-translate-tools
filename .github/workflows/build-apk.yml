@@ -41,12 +41,13 @@ jobs:
           fi
           if [ -f android/build.gradle.kts ]; then
             root_gradle=android/build.gradle.kts
-            # Kotlin DSL：模板已用 evaluationDependsOn(:app) 提前求值子项目，afterEvaluate 会抛
-            # "already evaluated"。改用 plugins.withId 在插件应用时立即设置 compileSdk(反射)。
-            extra=$'subprojects {\n    val p = this\n    plugins.withId("com.android.library") { forceCompileSdk(p) }\n    plugins.withId("com.android.application") { forceCompileSdk(p) }\n}\nfun forceCompileSdk(p: Project) {\n    val android = p.extensions.findByName("android") ?: return\n    for (n in listOf("setCompileSdk", "setCompileSdkVersion")) {\n        val m = android.javaClass.methods.firstOrNull { it.name == n && it.parameterCount == 1 && it.parameterTypes[0] == Int::class.java }\n        if (m != null) { m.invoke(android, 36); break }\n    }\n}\n'
+            # Kotlin DSL：withId 触发太早(会被插件自己的 android{} 覆盖)，需在配置完成后设置；
+            # 但 :app 已被 evaluationDependsOn 提前求值，对它调 afterEvaluate 会抛
+            # "already evaluated"，故用 state.executed 守卫只注册未求值项目。
+            extra=$'subprojects {\n    if (!state.executed) {\n        afterEvaluate { forceCompileSdk(this) }\n    }\n}\nfun forceCompileSdk(p: Project) {\n    val android = p.extensions.findByName("android") ?: return\n    for (n in listOf("setCompileSdk", "setCompileSdkVersion")) {\n        val m = android.javaClass.methods.firstOrNull { it.name == n && it.parameterCount == 1 && it.parameterTypes[0] == Int::class.java }\n        if (m != null) { m.invoke(android, 36); break }\n    }\n}\n'
           else
             root_gradle=android/build.gradle
-            extra=$'subprojects {\n    plugins.withId("com.android.library") { setC(project) }\n    plugins.withId("com.android.application") { setC(project) }\n}\ndef setC(p) {\n    def android = p.extensions.findByName("android")\n    if (android != null) android.compileSdkVersion 36\n}\n'
+            extra=$'subprojects {\n    if (!state.executed) {\n        afterEvaluate {\n            def android = extensions.findByName("android")\n            if (android != null) android.compileSdkVersion 36\n        }\n    }\n}\n'
           fi
           sed -i 's/flutter\.compileSdkVersion/36/g' "$app_gradle"
           { echo; printf '%s' "$extra"; } >> "$root_gradle"

@@ -22,5 +22,10 @@ dev_dependencies:
     sdk: flutter
   flutter_lints: ^4.0.0
 
+# file_picker 传递依赖 flutter_plugin_android_lifecycle 最新版要求 compileSdk>=36，
+# 而 3.47 默认是 34；固定旧版本避免 AAR metadata 校验失败。
+dependency_overrides:
+  flutter_plugin_android_lifecycle: 2.0.20
+
 flutter:
   uses-material-design: true

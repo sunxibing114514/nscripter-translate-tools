@@ -2,10 +2,14 @@
 library;
 
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'commands.dart';
+
+/// 项目目录下存放生成的临时 / 中间 / 成品文件的子目录名称。
+const String nstranDirName = 'nstran';
 
 class AppSettings {
   static const _kProvider = 'provider';
@@ -18,6 +22,7 @@ class AppSettings {
   static const _kMaxRps = 'max_requests_per_second';
   static const _kGlossary = 'glossary';
   static const _kCustomCommands = 'custom_commands';
+  static const _kProjectFolder = 'project_folder';
 
   final SharedPreferences _prefs;
   AppSettings._(this._prefs);
@@ -66,6 +71,33 @@ class AppSettings {
 
   set glossary(Map<String, String> v) {
     _prefs.setString(_kGlossary, jsonEncode(v));
+  }
+
+  // ---- 项目文件夹 ----
+  /// 项目根目录（用户选择的游戏 / 脚本目录）。
+  String? get projectFolder => _prefs.getString(_kProjectFolder);
+  set projectFolder(String? v) {
+    if (v == null) {
+      _prefs.remove(_kProjectFolder);
+    } else {
+      _prefs.setString(_kProjectFolder, v);
+    }
+  }
+
+  /// nstran 目录绝对路径；未设置项目文件夹时返回 null。
+  String? get nstranFolder {
+    final pf = projectFolder;
+    if (pf == null || pf.isEmpty) return null;
+    return '$pf/$nstranDirName';
+  }
+
+  /// 确保 nstran 目录存在并返回其路径。
+  /// 若未设置项目文件夹则返回 null。
+  Future<String?> ensureNstranFolder() async {
+    final nf = nstranFolder;
+    if (nf == null) return null;
+    await Directory(nf).create(recursive: true);
+    return nf;
   }
 
   // ---- 自定义命令集 ----

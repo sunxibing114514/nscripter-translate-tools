@@ -14,6 +14,12 @@ Future<String?> pickFile({List<String>? extensions, FileType type = FileType.any
   return result.files.single.path;
 }
 
+/// 弹出文件夹选择框，返回选中文件夹的绝对路径（取消时返回 null）。
+Future<String?> pickFolder() async {
+  final selected = await FilePicker.platform.getDirectoryPath();
+  return selected;
+}
+
 /// 弹出保存对话框并写入字节，返回保存路径（取消时返回 null）。
 Future<String?> saveBytes(String suggestedName, Uint8List bytes) async {
   final path = await FilePicker.platform.saveFile(

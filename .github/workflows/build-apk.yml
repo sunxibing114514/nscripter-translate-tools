@@ -29,15 +29,49 @@ jobs:
         working-directory: flutter_app
         run: flutter create --org com.nscript --project-name nscript_translate_tools --platforms android .
 
-      # 部分插件(flutter_plugin_android_lifecycle)要求 compileSdk>=36，默认模板可能是34，强制提升到36
+      # 部分插件(flutter_plugin_android_lifecycle)要求 compileSdk>=36，默认模板可能是34/35，
+      # 在应用与所有子项目上强制提升到36
       - name: Force compileSdk 36
         working-directory: flutter_app
         shell: bash
         run: |
-          gradle="android/app/build.gradle"
-          [[ -f "android/app/build.gradle.kts" ]] && gradle="android/app/build.gradle.kts"
-          sed -i 's/flutter\.compileSdkVersion/36/' "$gradle"
-          grep -nE "compileSdk" "$gradle" || true
+          app_gradle="android/app/build.gradle"
+          [[ -f "android/app/build.gradle.kts" ]] && app_gradle="android/app/build.gradle.kts"
+          sed -i 's/flutter\.compileSdkVersion/36/' "$app_gradle"
+          grep -nE "compileSdk" "$app_gradle" || true
+
+          # 在根 build.gradle 末尾追加：强制所有子项目 compileSdk=36
+          root_gradle="android/build.gradle"
+          if [[ -f "android/build.gradle.kts" ]]; then
+            root_gradle="android/build.gradle.kts"
+            cat >> "$root_gradle" <<'EOF'
+
+subprojects {
+    afterEvaluate { p ->
+        if (p.plugins.hasPlugin("com.android.library")) {
+            p.android {
+                compileSdk 36
+            }
+        }
+    }
+}
+EOF
+          else
+            cat >> "$root_gradle" <<'EOF'
+
+subprojects {
+    afterEvaluate { project ->
+        if (project.hasProperty("android")) {
+            project.android {
+                compileSdkVersion 36
+            }
+        }
+    }
+}
+EOF
+          fi
+          echo "== root gradle tail =="
+          tail -15 "$root_gradle"
 
       # 向 AndroidManifest 注入存储读取权限(SAF 之外的必要权限)，并配置 file_picker
       - name: Add storage permissions to manifest

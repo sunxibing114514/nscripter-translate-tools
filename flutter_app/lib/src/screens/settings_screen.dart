@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../file_utils.dart';
 import '../settings.dart';
+import '../widgets.dart';
 
 /// 设置界面：主题、项目文件夹(nstran 目录)、翻译 API、术语表、命令集。
 class SettingsScreen extends StatefulWidget {

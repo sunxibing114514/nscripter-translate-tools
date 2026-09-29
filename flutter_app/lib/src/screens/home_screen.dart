@@ -21,7 +21,7 @@ class HomeScreen extends StatelessWidget {
           () => Navigator.push(context, MaterialPageRoute(builder: (_) => InjectScreen(settings: settings)))),
       _Tool('AI 批量翻译', 'LLM 批量翻译（实时速率）', Icons.translate,
           () => Navigator.push(context, MaterialPageRoute(builder: (_) => TranslateScreen(settings: settings)))),
-      _Tool('符号修复', '修复翻译后缺失的 \\ 与 /', Icons.fix_high_outlined,
+      _Tool('符号修复', '修复翻译后缺失的 \\ 与 /', Icons.build_outlined,
           () => Navigator.push(context, MaterialPageRoute(builder: (_) => FixSlashesScreen()))),
       _Tool('DAT 解封包', 'nscript.dat ↔ nscript.txt (XOR)', Icons.lock_outline,
           () => Navigator.push(context, MaterialPageRoute(builder: (_) => DatScreen()))),

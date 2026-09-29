@@ -457,8 +457,9 @@ String extractTranslation(String responseText, int lineNumber) {
   var translated = match != null ? match.group(1)!.trim() : responseText.trim();
 
   // 去掉行首的序号 / T: 等标记
-  translated = RegExp(r'^\d+\.\s*T?:?\s*', multiLine: true)
-      .replaceAll(translated, '');
-  translated = RegExp(r'^\d+\.\s*$', multiLine: true).replaceAll(translated, '');
+  translated = translated.replaceAll(
+      RegExp(r'^\d+\.\s*T?:?\s*', multiLine: true), '');
+  translated =
+      translated.replaceAll(RegExp(r'^\d+\.\s*$', multiLine: true), '');
   return translated.trim();
 }

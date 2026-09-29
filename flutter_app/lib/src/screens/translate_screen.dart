@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -166,7 +167,16 @@ class _TranslateScreenState extends State<TranslateScreen> {
       _showSnack('暂无可保存的翻译结果');
       return;
     }
-    final saved = await saveBytes(_outputName.isEmpty ? 'out.txt' : _outputName, _results);
+    final name = _outputName.isEmpty ? 'out.txt' : _outputName;
+    // 优先保存到项目 nstran 目录
+    final nstran = await widget.settings.ensureNstranFolder();
+    if (nstran != null) {
+      final target = '$nstran/$name';
+      await File(target).writeAsBytes(_results, flush: true);
+      _showSnack('已保存到 nstran：$target');
+      return;
+    }
+    final saved = await saveBytes(name, _results);
     if (saved != null) _showSnack('已保存到：$saved');
   }
 

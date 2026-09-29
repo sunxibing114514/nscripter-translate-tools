@@ -6,6 +6,7 @@ import 'dat_screen.dart';
 import 'extract_screen.dart';
 import 'fix_slashes_screen.dart';
 import 'inject_screen.dart';
+import 'settings_screen.dart';
 import 'translate_screen.dart';
 
 class HomeScreen extends StatelessWidget {
@@ -27,6 +28,8 @@ class HomeScreen extends StatelessWidget {
           () => Navigator.push(context, MaterialPageRoute(builder: (_) => DatScreen()))),
       _Tool('命令集', '查看 / 导入 NScripter 命令表', Icons.list_alt_outlined,
           () => Navigator.push(context, MaterialPageRoute(builder: (_) => CommandsScreen(settings: settings)))),
+      _Tool('设置', '项目文件夹 / API / 术语表 / 命令集', Icons.settings_outlined,
+          () => Navigator.push(context, MaterialPageRoute(builder: (_) => SettingsScreen(settings: settings)))),
     ];
 
     return Scaffold(

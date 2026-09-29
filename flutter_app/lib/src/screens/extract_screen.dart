@@ -21,13 +21,24 @@ class _ExtractScreenState extends State<ExtractScreen> {
   String _inEnc = 'shift_jis';
   String _outEnc = 'utf8';
   bool _expand = true;
+  late final TextEditingController _sourceCtrl;
   String? _sourcePath;
   Uint8List _result = Uint8List(0);
   String _status = '请选择需要提取的原始脚本';
 
-  Future<void> _pick() async {
-    final path = await pickFile(extensions: ['txt']);
-    if (path == null) return;
+  @override
+  void initState() {
+    super.initState();
+    _sourceCtrl = TextEditingController();
+  }
+
+  @override
+  void dispose() {
+    _sourceCtrl.dispose();
+    super.dispose();
+  }
+
+  void _pickFromBrowse(String path) {
     setState(() {
       _sourcePath = path;
       _result = Uint8List(0);
@@ -35,13 +46,28 @@ class _ExtractScreenState extends State<ExtractScreen> {
     });
   }
 
+  Future<void> _pick() async {
+    try {
+      final path = await pickFile(extensions: ['txt']);
+      if (path == null) return;
+      _sourceCtrl.text = path;
+      _pickFromBrowse(path);
+    } catch (e) {
+      _showSnack('选择失败：$e，可手动输入路径');
+    }
+  }
+
   Future<void> _run() async {
-    if (_sourcePath == null) {
+    var src = _sourcePath;
+    // 手动输入/粘贴的路径兜底
+    final manual = _sourceCtrl.text.trim();
+    if (manual.isNotEmpty) src = manual;
+    if (src == null) {
       _showSnack('请先选择原始脚本');
       return;
     }
     try {
-      final bytes = await readBytes(_sourcePath!);
+      final bytes = await readBytes(src);
       final decoded = decodeBytes(bytes, _inEnc);
       final out = extractText(decoded, expand: _expand);
       final encoded = encodeString(out, _outEnc);
@@ -87,13 +113,11 @@ class _ExtractScreenState extends State<ExtractScreen> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          Card(
-            child: ListTile(
-              leading: const Icon(Icons.folder_open),
-              title: Text(_sourcePath ?? '选择原始脚本 (.txt)'),
-              trailing: const Icon(Icons.attach_file),
-              onTap: _pick,
-            ),
+          PathField(
+            label: '原始脚本路径 (.txt)',
+            controller: _sourceCtrl,
+            hint: '可点击“浏览”或在此粘贴绝对路径',
+            pick: () => pickFile(extensions: ['txt']),
           ),
           const SizedBox(height: 16),
           EncodingField(

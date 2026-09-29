@@ -4,6 +4,61 @@ library;
 import 'package:flutter/material.dart';
 
 import 'encodings.dart';
+import 'file_utils.dart';
+
+/// 路径选择：一个文本输入框 + 「浏览」按钮。
+/// 文本输入框可手动填入/粘贴绝对路径，作为系统文件选择器的兜底。
+class PathField extends StatelessWidget {
+  final String label;
+  final TextEditingController controller;
+  final String? hint;
+  final Future<String?> Function()? pick;
+  const PathField({
+    super.key,
+    required this.label,
+    required this.controller,
+    this.hint,
+    this.pick,
+  });
+
+  Future<void> _browse(BuildContext context) async {
+    try {
+      final path = pick == null ? await pickFile() : await pick!();
+      if (path != null) controller.text = path;
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('选择失败：$e，可手动输入路径')));
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Expanded(
+          child: TextField(
+            controller: controller,
+            style: const TextStyle(fontSize: 13),
+            decoration: InputDecoration(
+              labelText: label,
+              hintText: hint,
+              border: const OutlineInputBorder(),
+              isDense: true,
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        OutlinedButton(
+          onPressed: () => _browse(context),
+          style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 12)),
+          child: const Text('浏览'),
+        ),
+      ],
+    );
+  }
+}
 
 /// 编码下拉选择。
 class EncodingField extends StatelessWidget {

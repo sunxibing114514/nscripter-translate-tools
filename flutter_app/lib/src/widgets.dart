@@ -8,20 +8,34 @@ import 'file_utils.dart';
 
 /// 路径选择：一个文本输入框 + 「浏览」按钮。
 /// 文本输入框可手动填入/粘贴绝对路径，作为系统文件选择器的兜底。
+/// [pick] 返回路径并回填输入框；[browse] 存在时优先执行自定义浏览逻辑。
 class PathField extends StatelessWidget {
   final String label;
   final TextEditingController controller;
   final String? hint;
   final Future<String?> Function()? pick;
+  final Future<void> Function()? browse;
   const PathField({
     super.key,
     required this.label,
     required this.controller,
     this.hint,
     this.pick,
+    this.browse,
   });
 
   Future<void> _browse(BuildContext context) async {
+    if (browse != null) {
+      try {
+        await browse!();
+      } catch (e) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context)
+              .showSnackBar(SnackBar(content: Text('选择失败：$e，可手动输入路径')));
+        }
+      }
+      return;
+    }
     try {
       final path = pick == null ? await pickFile() : await pick!();
       if (path != null) controller.text = path;

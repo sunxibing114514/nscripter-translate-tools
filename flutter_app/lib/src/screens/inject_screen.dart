@@ -22,8 +22,10 @@ class _InjectScreenState extends State<InjectScreen> {
   String _outEnc = 'shift_jis';
   late final TextEditingController _scriptCtrl; // 原始脚本
   late final TextEditingController _transCtrl; // 翻译文件
-  String? _scriptPath;
-  String? _transPath;
+  Uint8List? _scriptBytes;
+  Uint8List? _transBytes;
+  String? _scriptName;
+  String? _transName;
   Uint8List _result = Uint8List(0);
   String _status = '请选择原始脚本与翻译文件';
 
@@ -43,17 +45,21 @@ class _InjectScreenState extends State<InjectScreen> {
 
   Future<void> _pick(String which) async {
     try {
-      final path = await pickFile(extensions: ['txt']);
-      if (path == null) return;
+      final picked = await pickFileBytes(extensions: ['txt']);
+      if (picked == null) return;
+      final (name, bytes) = picked;
       setState(() {
         if (which == 'script') {
-          _scriptPath = path;
-          _scriptCtrl.text = path;
+          _scriptBytes = bytes;
+          _scriptName = name;
+          _scriptCtrl.text = _scriptCtrl.text.isEmpty ? name : _scriptCtrl.text;
         } else {
-          _transPath = path;
-          _transCtrl.text = path;
+          _transBytes = bytes;
+          _transName = name;
+          _transCtrl.text = _transCtrl.text.isEmpty ? name : _transCtrl.text;
         }
         _result = Uint8List(0);
+        _status = '已选择：$name';
       });
     } catch (e) {
       _showSnack('选择失败：$e，可手动输入路径');
@@ -61,17 +67,29 @@ class _InjectScreenState extends State<InjectScreen> {
   }
 
   Future<void> _run() async {
-    var script = _scriptPath;
-    var trans = _transPath;
-    if (_scriptCtrl.text.trim().isNotEmpty) script = _scriptCtrl.text.trim();
-    if (_transCtrl.text.trim().isNotEmpty) trans = _transCtrl.text.trim();
-    if (script == null || trans == null) {
-      _showSnack('请选择原始脚本与翻译文件');
-      return;
+    Uint8List scriptBytes;
+    Uint8List transBytes;
+    if (_scriptBytes != null) {
+      scriptBytes = _scriptBytes!;
+    } else {
+      var script = _scriptCtrl.text.trim();
+      if (script.isEmpty) {
+        _showSnack('请选择原始脚本');
+        return;
+      }
+      scriptBytes = await readBytes(script);
+    }
+    if (_transBytes != null) {
+      transBytes = _transBytes!;
+    } else {
+      var trans = _transCtrl.text.trim();
+      if (trans.isEmpty) {
+        _showSnack('请选择翻译文件');
+        return;
+      }
+      transBytes = await readBytes(trans);
     }
     try {
-      final scriptBytes = await readBytes(script);
-      final transBytes = await readBytes(trans);
       final scriptText = decodeBytes(scriptBytes, _inEnc);
       final transText = decodeBytes(transBytes, _transEnc);
       final out = injectText(scriptText, transText);
@@ -90,7 +108,7 @@ class _InjectScreenState extends State<InjectScreen> {
       _showSnack('没有可保存的结果');
       return;
     }
-    final name = _scriptPath == null ? 'script.txt' : _scriptPath!.split('/').last;
+    final name = _scriptName ?? 'script.txt';
     final saved = await saveBytes(name, _result);
     if (saved != null) _showSnack('已保存到：$saved');
   }
@@ -112,14 +130,14 @@ class _InjectScreenState extends State<InjectScreen> {
             label: '原始脚本路径 (.txt)',
             controller: _scriptCtrl,
             hint: '最初用于提取的脚本',
-            pick: () => pickFile(extensions: ['txt']),
+            browse: () => _pick('script'),
           ),
           const SizedBox(height: 12),
           PathField(
             label: '翻译文件路径 (.txt)',
             controller: _transCtrl,
             hint: '由 提取 / AI翻译 生成',
-            pick: () => pickFile(extensions: ['txt']),
+            browse: () => _pick('trans'),
           ),
           const SizedBox(height: 16),
           EncodingField(label: '原脚本编码', value: _inEnc, onChanged: (v) => setState(() => _inEnc = v)),

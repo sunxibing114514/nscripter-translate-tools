@@ -24,16 +24,21 @@ class _CommandsScreenState extends State<CommandsScreen> {
   }
 
   Future<void> _import() async {
-    final path = await pickFile(extensions: ['txt']);
-    if (path == null) return;
-    final content = String.fromCharCodes(await readBytes(path));
-    final parsed = parseCommandsFile(content);
-    setState(() {
-      _commands = parsed;
-      _usingCustom = true;
-      widget.settings.customCommands = content;
-    });
-    _showSnack('已导入命令集，共 ${parsed.length} 条');
+    try {
+      final picked = await pickFileBytes(extensions: ['txt']);
+      if (picked == null) return;
+      final (_, bytes) = picked;
+      final content = String.fromCharCodes(bytes);
+      final parsed = parseCommandsFile(content);
+      setState(() {
+        _commands = parsed;
+        _usingCustom = true;
+        widget.settings.customCommands = content;
+      });
+      _showSnack('已导入命令集，共 ${parsed.length} 条');
+    } catch (e) {
+      _showSnack('导入失败：$e');
+    }
   }
 
   Future<void> _reset() async {

@@ -39,6 +39,19 @@ jobs:
           sed -i 's/flutter\.compileSdkVersion/36/' "$gradle"
           grep -nE "compileSdk" "$gradle" || true
 
+      # 向 AndroidManifest 注入存储读取权限(SAF 之外的必要权限)，并配置 file_picker
+      - name: Add storage permissions to manifest
+        working-directory: flutter_app
+        shell: bash
+        run: |
+          manifest="android/app/src/main/AndroidManifest.xml"
+          # 在 <manifest ...> 后插入 uses-permission
+          sed -i 's|<manifest \(.*\)>|<manifest \1>\n    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32"/>\n    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29"/>|' "$manifest"
+          # 在 <application 标签加 requestLegacyExternalStorage(仅影响 API<=29)
+          sed -i 's|<application|<application android:requestLegacyExternalStorage="true"|' "$manifest"
+          echo "== manifest head =="
+          head -20 "$manifest"
+
       - name: Install dependencies
         working-directory: flutter_app
         run: flutter pub get

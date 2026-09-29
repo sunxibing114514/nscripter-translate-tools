@@ -22,6 +22,8 @@ class _ExtractScreenState extends State<ExtractScreen> {
   String _outEnc = 'utf8';
   bool _expand = true;
   late final TextEditingController _sourceCtrl;
+  String? _sourceName;
+  Uint8List? _pickedBytes; // 浏览选择时直接携带的数据（Android 兼容）
   String? _sourcePath;
   Uint8List _result = Uint8List(0);
   String _status = '请选择需要提取的原始脚本';
@@ -38,36 +40,38 @@ class _ExtractScreenState extends State<ExtractScreen> {
     super.dispose();
   }
 
-  void _pickFromBrowse(String path) {
-    setState(() {
-      _sourcePath = path;
-      _result = Uint8List(0);
-      _status = '已选择：$path';
-    });
-  }
-
   Future<void> _pick() async {
     try {
-      final path = await pickFile(extensions: ['txt']);
-      if (path == null) return;
-      _sourceCtrl.text = path;
-      _pickFromBrowse(path);
+      final picked = await pickFileBytes(extensions: ['txt']);
+      if (picked == null) return;
+      final (name, bytes) = picked;
+      setState(() {
+        _pickedBytes = bytes;
+        _sourceName = name;
+        _sourceCtrl.text = _sourceCtrl.text.isEmpty ? name : _sourceCtrl.text;
+        _result = Uint8List(0);
+        _status = '已选择：$name（${bytes.length} 字节）';
+      });
     } catch (e) {
       _showSnack('选择失败：$e，可手动输入路径');
     }
   }
 
   Future<void> _run() async {
-    var src = _sourcePath;
-    // 手动输入/粘贴的路径兜底
-    final manual = _sourceCtrl.text.trim();
-    if (manual.isNotEmpty) src = manual;
-    if (src == null) {
-      _showSnack('请先选择原始脚本');
-      return;
+    Uint8List bytes;
+    if (_pickedBytes != null) {
+      bytes = _pickedBytes!;
+    } else {
+      var src = _sourcePath;
+      final manual = _sourceCtrl.text.trim();
+      if (manual.isNotEmpty) src = manual;
+      if (src == null) {
+        _showSnack('请先选择原始脚本');
+        return;
+      }
+      bytes = await readBytes(src);
     }
     try {
-      final bytes = await readBytes(src);
       final decoded = decodeBytes(bytes, _inEnc);
       final out = extractText(decoded, expand: _expand);
       final encoded = encodeString(out, _outEnc);
@@ -85,9 +89,7 @@ class _ExtractScreenState extends State<ExtractScreen> {
       _showSnack('没有可保存的结果');
       return;
     }
-    final name = _sourcePath == null
-        ? 'out.txt'
-        : '提取_${_sourcePath!.split('/').last}';
+    final name = _sourceName ?? (_sourcePath == null ? 'out.txt' : '提取_${_sourcePath!.split('/').last}');
     // 优先保存到项目 nstran 目录
     final nstran = await widget.settings.ensureNstranFolder();
     if (nstran != null) {
@@ -117,7 +119,7 @@ class _ExtractScreenState extends State<ExtractScreen> {
             label: '原始脚本路径 (.txt)',
             controller: _sourceCtrl,
             hint: '可点击“浏览”或在此粘贴绝对路径',
-            pick: () => pickFile(extensions: ['txt']),
+            browse: _pick,
           ),
           const SizedBox(height: 16),
           EncodingField(

@@ -7,7 +7,34 @@ import 'dart:typed_data';
 import 'package:file_picker/file_picker.dart';
 import 'package:path_provider/path_provider.dart' as pp;
 
-/// 弹出文件选择框，返回选中文件的绝对路径（取消返回 null，异常时抛出提示）。
+/// 从 [result] 中提取字节。优先直接使用 withData 返回的数据，
+/// 否则退回按 path 读取（Android 上 path 可能为 null，此时会抛出可读错误）。
+Uint8List _bytesOf(PlatformFile f) {
+  if (f.bytes != null) return f.bytes!;
+  if (f.path != null) {
+    return File(f.path!).readAsBytesSync();
+  }
+  throw StateError('无法读取所选文件内容（无路径且未携带数据）');
+}
+
+/// 弹出文件选择框并直接读取字节，返回 (文件名, 字节)。
+/// 取消时返回 null。失败时抛出异常。
+Future<(String, Uint8List)?> pickFileBytes({
+  List<String>? extensions,
+  FileType type = FileType.any,
+}) async {
+  final result = await FilePicker.platform.pickFiles(
+    type: type,
+    allowedExtensions: extensions,
+    withData: true,
+  );
+  if (result == null || result.files.isEmpty) return null;
+  final f = result.files.single;
+  return (f.name, _bytesOf(f));
+}
+
+/// 弹出文件选择框，返回选中文件的绝对路径（取消返回 null）。
+/// Android 上若系统返回 content:// URI 而无真实路径，将抛出异常提示。
 Future<String?> pickFile({List<String>? extensions, FileType type = FileType.any}) async {
   final result = await FilePicker.platform.pickFiles(type: type, allowedExtensions: extensions);
   if (result == null || result.files.isEmpty) return null;

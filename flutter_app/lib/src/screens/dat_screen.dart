@@ -1,13 +1,16 @@
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 
 import '../dat.dart';
 import '../file_utils.dart';
+import '../settings.dart';
 import '../widgets.dart';
 
 class DatScreen extends StatefulWidget {
-  const DatScreen({super.key});
+  final AppSettings settings;
+  const DatScreen({super.key, required this.settings});
 
   @override
   State<DatScreen> createState() => _DatScreenState();
@@ -88,6 +91,14 @@ class _DatScreenState extends State<DatScreen> {
     if (_result.isEmpty) return;
     final lower = _name?.toLowerCase() ?? '';
     final name = lower.endsWith('.dat') ? 'nscript.txt' : 'nscript.dat';
+    // 优先保存到项目 nstran 目录（并自动创建），未设置项目文件夹时退回系统保存对话框
+    final nstran = await widget.settings.ensureNstranFolder();
+    if (nstran != null) {
+      final target = '$nstran/$name';
+      await File(target).writeAsBytes(_result, flush: true);
+      _showSnack('已保存到 nstran：$target');
+      return;
+    }
     final saved = await saveBytes(name, _result);
     if (saved != null) _showSnack('已保存到：$saved');
   }

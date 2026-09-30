@@ -47,8 +47,14 @@ class TranslateConfig {
   };
 
   /// 解析最终 api_base。
+  /// 自定义地址未携带协议时自动补全 https://，
+  /// 否则 Dart 会把域名误当作 scheme、host 为空，导致无法解析 IP。
   String resolvedBase() {
-    if (apiBase.trim().isNotEmpty) return apiBase.trim();
+    if (apiBase.trim().isNotEmpty) {
+      var base = apiBase.trim();
+      if (!base.contains('://')) base = 'https://$base';
+      return base;
+    }
     final base = defaultBases[provider.toLowerCase()];
     if (base == null) {
       throw ArgumentError('未知的 AI 提供商 $provider，请在配置中指定 api_base');

@@ -6,6 +6,7 @@ import 'dat_screen.dart';
 import 'extract_screen.dart';
 import 'fix_slashes_screen.dart';
 import 'inject_screen.dart';
+import 'proofread_screen.dart';
 import 'settings_screen.dart';
 import 'translate_screen.dart';
 
@@ -23,6 +24,8 @@ class HomeScreen extends StatelessWidget {
           () => Navigator.push(context, MaterialPageRoute(builder: (_) => InjectScreen(settings: settings)))),
       _Tool('AI 批量翻译', 'LLM 批量翻译（实时速率）', Icons.translate,
           () => Navigator.push(context, MaterialPageRoute(builder: (_) => TranslateScreen(settings: settings)))),
+      _Tool('AI 校对', '校对译文：错译 / 漏译 / 串行 / 多译', Icons.verified_outlined,
+          () => Navigator.push(context, MaterialPageRoute(builder: (_) => ProofreadScreen(settings: settings)))),
       _Tool('符号修复', '修复翻译后缺失的 \\ 与 /', Icons.build_outlined,
           () => Navigator.push(context, MaterialPageRoute(builder: (_) => FixSlashesScreen(settings: settings)))),
       _Tool('DAT 解封包', 'nscript.dat ↔ nscript.txt (XOR)', Icons.lock_outline,

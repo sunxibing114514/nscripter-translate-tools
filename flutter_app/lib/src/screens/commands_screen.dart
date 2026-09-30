@@ -25,7 +25,7 @@ class _CommandsScreenState extends State<CommandsScreen> {
 
   Future<void> _import() async {
     try {
-      final picked = await pickFileBytes(extensions: ['txt']);
+      final picked = await pickFileBytes();
       if (picked == null) return;
       final (_, bytes) = picked;
       final content = String.fromCharCodes(bytes);

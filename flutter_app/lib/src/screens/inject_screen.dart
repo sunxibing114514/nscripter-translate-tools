@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -45,7 +46,7 @@ class _InjectScreenState extends State<InjectScreen> {
 
   Future<void> _pick(String which) async {
     try {
-      final picked = await pickFileBytes(extensions: ['txt']);
+      final picked = await pickFileBytes();
       if (picked == null) return;
       final (name, bytes) = picked;
       setState(() {
@@ -109,6 +110,14 @@ class _InjectScreenState extends State<InjectScreen> {
       return;
     }
     final name = _scriptName ?? 'script.txt';
+    // 优先保存到项目 nstran 目录
+    final nstran = await widget.settings.ensureNstranFolder();
+    if (nstran != null) {
+      final target = '$nstran/$name';
+      await File(target).writeAsBytes(_result, flush: true);
+      _showSnack('已保存到 nstran：$target');
+      return;
+    }
     final saved = await saveBytes(name, _result);
     if (saved != null) _showSnack('已保存到：$saved');
   }

@@ -26,7 +26,7 @@ class HomeScreen extends StatelessWidget {
       _Tool('符号修复', '修复翻译后缺失的 \\ 与 /', Icons.build_outlined,
           () => Navigator.push(context, MaterialPageRoute(builder: (_) => FixSlashesScreen()))),
       _Tool('DAT 解封包', 'nscript.dat ↔ nscript.txt (XOR)', Icons.lock_outline,
-          () => Navigator.push(context, MaterialPageRoute(builder: (_) => DatScreen()))),
+          () => Navigator.push(context, MaterialPageRoute(builder: (_) => DatScreen(settings: settings))),
       _Tool('命令集', '查看 / 导入 NScripter 命令表', Icons.list_alt_outlined,
           () => Navigator.push(context, MaterialPageRoute(builder: (_) => CommandsScreen(settings: settings)))),
       _Tool('设置', '主题 / 项目文件夹 / API / 术语表 / 命令集', Icons.settings_outlined,

@@ -56,14 +56,16 @@ jobs:
           echo "== root gradle tail =="
           tail -12 "$root_gradle"
 
-      # 向 AndroidManifest 注入存储读取权限(SAF 之外的必要权限)，并配置 file_picker
-      - name: Add storage permissions to manifest
+      # 向 AndroidManifest 注入 INTERNET 与存储读取权限(SAF 之外的必要权限)，并配置 file_picker
+      # 注意：flutter create 生成的 main manifest 默认没有 INTERNET 权限（仅 debug 有），
+      # release 包若缺失会导致网络请求报“域名无法解析为 IP”。
+      - name: Add permissions to manifest
         working-directory: flutter_app
         shell: bash
         run: |
           manifest="android/app/src/main/AndroidManifest.xml"
           # 在 <manifest ...> 后插入 uses-permission
-          sed -i 's|<manifest \(.*\)>|<manifest \1>\n    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32"/>\n    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29"/>|' "$manifest"
+          sed -i 's|<manifest \(.*\)>|<manifest \1>\n    <uses-permission android:name="android.permission.INTERNET"/>\n    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32"/>\n    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29"/>|' "$manifest"
           # 在 <application 标签加 requestLegacyExternalStorage(仅影响 API<=29)
           sed -i 's|<application|<application android:requestLegacyExternalStorage="true"|' "$manifest"
           echo "== manifest head =="

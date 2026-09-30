@@ -49,7 +49,7 @@ class _DatScreenState extends State<DatScreen> {
 
   Future<void> _pick() async {
     try {
-      final picked = await pickFileBytes(extensions: ['dat', 'txt']);
+      final picked = await pickFileBytes();
       if (picked == null) return;
       final (name, bytes) = picked;
       _pickedBytes = bytes;

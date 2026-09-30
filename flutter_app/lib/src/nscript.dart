@@ -1,7 +1,10 @@
 /// 移植自 nscript_tool.py 的文本提取 / 注入核心逻辑。
 library;
 
+import 'dart:typed_data';
+
 import 'commands.dart';
+import 'encodings.dart';
 
 enum TextType { backtick, quoted, text }
 
@@ -49,8 +52,15 @@ bool isCommandLine(String line, Set<String> commands) {
   final firstWord =
       trimmed.split(RegExp(r'\s+')).first.toLowerCase();
   if (commands.contains(firstWord)) return true;
+
+  if (commands.contains(trimmed.toLowerCase())) return true;
+
+  // 仅比较与首字符一致的命令，避免对每个命令做 startsWith（O(N×M) 慢）。
   final lower = trimmed.toLowerCase();
+  final head = trimmed.isNotEmpty ? lower[0] : '';
   for (final cmd in commands) {
+    if (cmd.isEmpty) continue;
+    if (cmd[0] != head) continue;
     if (lower.startsWith(cmd) &&
         (trimmed.length == cmd.length || !_isAlnum(trimmed[cmd.length]))) {
       return true;
@@ -178,4 +188,32 @@ String injectText(String scriptContent, String transContent,
     throw StateError('翻译条目数多于脚本中的可翻译行数');
   }
   return output.join('\n');
+}
+
+/// 供后台 isolate（compute）调用的提取入口。
+/// args 顺序：[script(utf8/latin1编码字节), inEnc, outEnc, expand, commandsList]
+Uint8List extractOnIsolate(List<Object> args) {
+  final bytes = args[0] as List<int>;
+  final inEnc = args[1] as String;
+  final outEnc = args[2] as String;
+  final expand = args[3] as bool;
+  final commands = (args[4] as List).map((e) => e.toString()).toSet();
+  final decoded = decodeBytes(Uint8List.fromList(bytes), inEnc);
+  final out = extractText(decoded, commands: commands, expand: expand);
+  return encodeString(out, outEnc);
+}
+
+/// 供后台 isolate（compute）调用的注入入口。
+/// args 顺序：[scriptBytes, transBytes, inEnc, transEnc, outEnc, commandsList]
+Uint8List injectOnIsolate(List<Object> args) {
+  final scriptBytes = args[0] as List<int>;
+  final transBytes = args[1] as List<int>;
+  final inEnc = args[2] as String;
+  final transEnc = args[3] as String;
+  final outEnc = args[4] as String;
+  final commands = (args[5] as List).map((e) => e.toString()).toSet();
+  final scriptText = decodeBytes(Uint8List.fromList(scriptBytes), inEnc);
+  final transText = decodeBytes(Uint8List.fromList(transBytes), transEnc);
+  final out = injectText(scriptText, transText, commands: commands);
+  return encodeString(out, outEnc);
 }

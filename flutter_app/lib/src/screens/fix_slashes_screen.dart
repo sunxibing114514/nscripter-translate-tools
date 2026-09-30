@@ -69,7 +69,7 @@ class _FixSlashesScreenState extends State<FixSlashesScreen> {
       _showSnack('没有可保存的结果');
       return;
     }
-    final name = 'fixed.txt';
+    final name = '修复_fixed.txt';
     // 优先保存到项目 nstran 目录
     final nstran = await widget.settings.ensureNstranFolder();
     if (nstran != null) {
@@ -86,6 +86,15 @@ class _FixSlashesScreenState extends State<FixSlashesScreen> {
     if (!mounted) return;
     ScaffoldMessenger.of(context)
         .showSnackBar(SnackBar(content: Text(msg), duration: const Duration(seconds: 3)));
+  }
+
+  String _preview(Uint8List bytes) {
+    try {
+      final text = String.fromCharCodes(bytes);
+      return text.length > 4000 ? '${text.substring(0, 4000)}\n…（已截断，完整内容保存在文件中）' : text;
+    } catch (_) {
+      return '[无法预览二进制内容]';
+    }
   }
 
   @override
@@ -138,7 +147,7 @@ class _FixSlashesScreenState extends State<FixSlashesScreen> {
           Text('状态：$_status'),
           if (_result.isNotEmpty) ...[
             const SizedBox(height: 8),
-            ResultBox(title: '修复结果预览', text: String.fromCharCodes(_result)),
+            ResultBox(title: '修复结果预览', text: _preview(_result)),
           ],
         ],
       ),

@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../encodings.dart';
@@ -91,10 +92,12 @@ class _InjectScreenState extends State<InjectScreen> {
       transBytes = await readBytes(trans);
     }
     try {
-      final scriptText = decodeBytes(scriptBytes, _inEnc);
-      final transText = decodeBytes(transBytes, _transEnc);
-      final out = injectText(scriptText, transText);
-      final encoded = encodeString(out, _outEnc);
+      setState(() => _status = '注入中…（后台处理，可稍候）');
+      final commands = widget.settings.activeCommands().toList();
+      final encoded = await compute(
+        injectOnIsolate,
+        [scriptBytes, transBytes, _inEnc, _transEnc, _outEnc, commands],
+      );
       setState(() {
         _result = encoded;
         _status = '注入完成';
@@ -109,7 +112,9 @@ class _InjectScreenState extends State<InjectScreen> {
       _showSnack('没有可保存的结果');
       return;
     }
-    final name = _scriptName ?? 'script.txt';
+    // 保存为带功能前缀的独立文件名，避免覆盖源脚本
+    final base = _scriptName ?? 'script.txt';
+    final name = '注入_$base';
     // 优先保存到项目 nstran 目录
     final nstran = await widget.settings.ensureNstranFolder();
     if (nstran != null) {
@@ -190,7 +195,8 @@ class _InjectScreenState extends State<InjectScreen> {
 
   String _preview(Uint8List bytes) {
     try {
-      return String.fromCharCodes(bytes);
+      final text = String.fromCharCodes(bytes);
+      return text.length > 4000 ? '${text.substring(0, 4000)}\n…（已截断，完整内容保存在文件中）' : text;
     } catch (_) {
       return '[无法预览二进制内容]';
     }

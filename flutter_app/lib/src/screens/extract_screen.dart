@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../encodings.dart';
@@ -72,12 +73,19 @@ class _ExtractScreenState extends State<ExtractScreen> {
       bytes = await readBytes(src);
     }
     try {
-      final decoded = decodeBytes(bytes, _inEnc);
-      final out = extractText(decoded, expand: _expand);
-      final encoded = encodeString(out, _outEnc);
+      setState(() => _status = '提取中…（后台处理，可稍候）');
+      final commands = widget.settings.activeCommands().toList();
+      final encoded = await compute(
+        extractOnIsolate,
+        [bytes, _inEnc, _outEnc, _expand, commands],
+      );
+      final lines = decodeBytes(encoded, _outEnc)
+          .split('\n')
+          .where((l) => l.trim().isNotEmpty)
+          .length;
       setState(() {
         _result = encoded;
-        _status = '提取完成，${out.split('\n').where((l) => l.trim().isNotEmpty).length} 行可翻译文本';
+        _status = '提取完成，$lines 行可翻译文本';
       });
     } catch (e) {
       _showSnack('提取失败：$e');
@@ -89,7 +97,10 @@ class _ExtractScreenState extends State<ExtractScreen> {
       _showSnack('没有可保存的结果');
       return;
     }
-    final name = _sourceName ?? (_sourcePath == null ? 'out.txt' : '提取_${_sourcePath!.split('/').last}');
+    // 保存为带功能前缀的独立文件名，避免覆盖源文件
+    final base = _sourceName ??
+        (_sourcePath?.split('/').last ?? 'out.txt');
+    final name = '提取_$base';
     // 优先保存到项目 nstran 目录
     final nstran = await widget.settings.ensureNstranFolder();
     if (nstran != null) {
@@ -174,7 +185,8 @@ class _ExtractScreenState extends State<ExtractScreen> {
 
   String utf8_fallback(Uint8List bytes) {
     try {
-      return String.fromCharCodes(bytes);
+      final text = String.fromCharCodes(bytes);
+      return text.length > 4000 ? '${text.substring(0, 4000)}\n…（已截断，完整内容保存在文件中）' : text;
     } catch (_) {
       return '[无法预览二进制内容]';
     }

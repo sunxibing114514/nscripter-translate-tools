@@ -207,7 +207,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     label: '项目文件夹路径',
                     controller: _folderCtrl,
                     hint: '点击“浏览”或在此粘贴绝对路径',
-                    pick: pickFolder,
+                    browse: _pickProjectFolder,
                   ),
                   const SizedBox(height: 8),
                   Text(

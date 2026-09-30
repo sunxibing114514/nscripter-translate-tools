@@ -197,6 +197,7 @@ class TranslateEngine extends ChangeNotifier {
     required void Function(List<String> results) onComplete,
     required void Function(Object error) onError,
   }) async {
+    final skipNoSource = lineContainsSourceLanguageDetectable(config.sourceLanguage);
     if (_running) return;
     _running = true;
     _cancel = false;
@@ -227,19 +228,26 @@ class TranslateEngine extends ChangeNotifier {
     final sem = Semaphore(config.concurrency);
     final results = List<String>.filled(total, '');
 
-    // 构建任务列表（跳过空行）
+    // 构建任务列表（跳过空行、以及不含源语言文字的整行）
     final tasks = <(int, String)>[];
+    var skipped = 0;
     for (var i = 0; i < total; i++) {
       final line = sourceLines[i];
       if (line.trim().isEmpty) continue;
+      if (skipNoSource && !lineContainsSourceLanguage(line, config.sourceLanguage)) {
+        results[i] = line; // 该行没有源语言文字，整行跳过并保持原样
+        skipped++;
+        continue;
+      }
       tasks.add((i + 1, line));
     }
 
     _appendLog('共 $total 行，开始并发翻译（并发数=${config.concurrency}，'
-        '最大请求速率=${config.maxRequestsPerSecond}/s）');
+        '最大请求速率=${config.maxRequestsPerSecond}/s'
+        '${skipped > 0 ? '，跳过不含原文语言的 $skipped 行' : ''}）');
 
     final futures = <Future<void>>[];
-    var done = 0;
+    var done = skipped;
     var failed = 0;
 
     for (final (lineNo, line) in tasks) {
@@ -462,4 +470,83 @@ String extractTranslation(String responseText, int lineNumber) {
   translated =
       translated.replaceAll(RegExp(r'^\d+\.\s*$', multiLine: true), '');
   return translated.trim();
+}
+
+// ---- 按源语言文字判定某一行是否可跳过（不含源语言则无需翻译） ----
+
+bool _isCjk(int c) =>
+    (c >= 0x3400 && c <= 0x4DBF) || (c >= 0x4E00 && c <= 0x9FFF);
+bool _isHira(int c) => c >= 0x3040 && c <= 0x309F;
+bool _isKata(int c) => c >= 0x30A0 && c <= 0x30FF;
+bool _isHangul(int c) => c >= 0xAC00 && c <= 0xD7A3;
+bool _isCyr(int c) => (c >= 0x0400 && c <= 0x04FF);
+bool _isLatin(int c) =>
+    (c >= 0x41 && c <= 0x5A) ||
+    (c >= 0x61 && c <= 0x7A) ||
+    (c >= 0x00C0 && c <= 0x024F);
+
+/// 输入语言字符串是否可被字符集识别（可识别才启用“不含源语言则跳过”）。
+bool lineContainsSourceLanguageDetectable(String sourceLanguage) {
+  final s = sourceLanguage.trim().toLowerCase();
+  return s.contains('japan') ||
+      s.contains('日') ||
+      s.contains('korean') ||
+      s.contains('韩') ||
+      s.contains('russian') ||
+      s.contains('俄') ||
+      s.contains('chinese') ||
+      s.contains('中') ||
+      s.contains('english') ||
+      s.contains('英') ||
+      s.contains('french') ||
+      s.contains('法') ||
+      s.contains('german') ||
+      s.contains('德') ||
+      s.contains('spanish') ||
+      s.contains('西') ||
+      s.contains('italian') ||
+      s.contains('意') ||
+      s == 'ja' ||
+      s == 'ko' ||
+      s == 'zh' ||
+      s == 'en';
+}
+
+/// [line] 是否包含 [sourceLanguage] 对应的文字（不含则说明无需翻译）。
+bool lineContainsSourceLanguage(String line, String sourceLanguage) {
+  final s = sourceLanguage.trim().toLowerCase();
+  bool any(bool Function(int) pred) {
+    for (final r in line.runes) {
+      if (pred(r)) return true;
+    }
+    return false;
+  }
+
+  if (s.contains('japan') || s.contains('日') || s == 'ja') {
+    return any((c) => _isHira(c) || _isKata(c) || _isCjk(c));
+  }
+  if (s.contains('korean') || s.contains('韩') || s == 'ko') {
+    return any((c) => _isHangul(c) || _isCjk(c));
+  }
+  if (s.contains('russian') || s.contains('俄')) {
+    return any(_isCyr);
+  }
+  if (s.contains('chinese') || s.contains('中') || s == 'zh') {
+    return any(_isCjk);
+  }
+  if (s.contains('english') ||
+      s.contains('英') ||
+      s.contains('french') ||
+      s.contains('法') ||
+      s.contains('german') ||
+      s.contains('德') ||
+      s.contains('spanish') ||
+      s.contains('西') ||
+      s.contains('italian') ||
+      s.contains('意') ||
+      s == 'en') {
+    return any(_isLatin);
+  }
+  // 无法识别的语言：视为包含，不跳过（保持原有行为）
+  return true;
 }

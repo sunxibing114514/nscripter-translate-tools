@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -5,10 +6,12 @@ import 'package:flutter/material.dart';
 import '../encodings.dart';
 import '../file_utils.dart';
 import '../fix_slashes.dart';
+import '../settings.dart';
 import '../widgets.dart';
 
 class FixSlashesScreen extends StatefulWidget {
-  const FixSlashesScreen({super.key});
+  final AppSettings settings;
+  const FixSlashesScreen({super.key, required this.settings});
 
   @override
   State<FixSlashesScreen> createState() => _FixSlashesScreenState();
@@ -23,7 +26,7 @@ class _FixSlashesScreenState extends State<FixSlashesScreen> {
 
   Future<void> _pickOriginal() async {
     try {
-      final picked = await pickFileBytes(extensions: ['txt']);
+      final picked = await pickFileBytes();
       if (picked == null) return;
       final (_, bytes) = picked;
       setState(() => _origBytes = bytes);
@@ -34,7 +37,7 @@ class _FixSlashesScreenState extends State<FixSlashesScreen> {
 
   Future<void> _pickTrans() async {
     try {
-      final picked = await pickFileBytes(extensions: ['txt']);
+      final picked = await pickFileBytes();
       if (picked == null) return;
       final (_, bytes) = picked;
       setState(() => _transBytes = bytes);
@@ -67,6 +70,14 @@ class _FixSlashesScreenState extends State<FixSlashesScreen> {
       return;
     }
     final name = 'fixed.txt';
+    // 优先保存到项目 nstran 目录
+    final nstran = await widget.settings.ensureNstranFolder();
+    if (nstran != null) {
+      final target = '$nstran/$name';
+      await File(target).writeAsBytes(_result, flush: true);
+      _showSnack('已保存到 nstran：$target');
+      return;
+    }
     final saved = await saveBytes(name, _result);
     if (saved != null) _showSnack('已保存到：$saved');
   }

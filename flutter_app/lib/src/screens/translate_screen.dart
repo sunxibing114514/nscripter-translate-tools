@@ -93,7 +93,7 @@ class _TranslateScreenState extends State<TranslateScreen> {
 
   Future<void> _pickInput() async {
     try {
-      final picked = await pickFileBytes(extensions: ['txt']);
+      final picked = await pickFileBytes();
       if (picked == null) return;
       final (name, bytes) = picked;
       _inputBytes = bytes;

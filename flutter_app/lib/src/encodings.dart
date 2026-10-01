@@ -55,7 +55,7 @@ Encoding? _resolveTableCodec(String name, {required bool allowMalformed}) {
     case 'cp936':
       return charset.GbkCodec(allowMalformed: allowMalformed);
     case 'eucjp':
-      return charset.EUCJPCodec(allowMalformed);
+      return charset.EucJPCodec(allowMalformed);
   }
   return null;
 }

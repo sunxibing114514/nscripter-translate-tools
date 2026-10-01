@@ -118,9 +118,10 @@ void main() {
     });
 
     test('CRLF 输入按 universal newlines 处理', () {
+      // 第二行没有反引号 → 普通文本行（T:），与 main 的分类一致
       expect(
         extractText('`テスト\r\nテスト2\r\n', expand: false),
-        'B:テスト\nB:テスト2\n',
+        'B:テスト\nT:テスト2\n',
       );
     });
   });

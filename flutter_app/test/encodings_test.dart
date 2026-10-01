@@ -56,8 +56,10 @@ void main() {
   });
 
   group('有损编码防护（main 的 Python 编码失败会抛错中止）', () {
-    test('shift_jis 无法表示中文时报错而非静默写乱码', () {
-      expect(() => encodeString('中文', 'shift_jis'), throwsFormatException);
+    test('shift_jis 无法表示的文字（如韩文）报错而非静默写乱码', () {
+      // Python：'한국어'.encode('shift_jis') → UnicodeEncodeError。
+      // （注：中文「中文」二字在 JIS 汉字集中，shift_jis 可以表示，故不作为用例）
+      expect(() => encodeString('한국어', 'shift_jis'), throwsFormatException);
     });
 
     test('gbk 能表示中文，不报错', () {

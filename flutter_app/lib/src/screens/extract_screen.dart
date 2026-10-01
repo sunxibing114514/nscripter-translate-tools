@@ -176,19 +176,21 @@ class _ExtractScreenState extends State<ExtractScreen> {
           if (_result.isNotEmpty)
             ResultBox(
               title: '提取结果预览',
-              text: utf8_fallback(_result),
+              text: _preview(_result),
             ),
         ],
       ),
     );
   }
 
-  String utf8_fallback(Uint8List bytes) {
-    try {
-      final text = String.fromCharCodes(bytes);
-      return text.length > 4000 ? '${text.substring(0, 4000)}\n…（已截断，完整内容保存在文件中）' : text;
-    } catch (_) {
-      return '[无法预览二进制内容]';
-    }
+  /// 预览文本：按输出编码解码。
+  /// 原实现用 String.fromCharCodes 把字节当作 Latin-1 码位，
+  /// UTF-8/GBK 等多字节内容会显示成乱码；这里先按字节截断再宽容解码。
+  String _preview(Uint8List bytes) {
+    final cut = bytes.length > 4000 ? bytes.sublist(0, 4000) : bytes;
+    final text = decodeBytes(cut, _outEnc);
+    return text.length > 4000
+        ? '${text.substring(0, 4000)}\n…（已截断，完整内容保存在文件中）'
+        : text;
   }
 }

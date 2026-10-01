@@ -1,5 +1,9 @@
 /// 移植自 translate.py 的 LLM 批量翻译引擎。
 ///
+/// main（translate.py）为行为基准：
+/// - 重试次数/退避公式与 main 一致（max_retries、retry_delay*2^n、429 用 3^n）。
+/// - 翻译失败的行保留原文（含类型前缀），而不是写入无前缀的
+///   「[翻译失败]」标记——那会让后续注入直接失败（main 的已知问题）。
 /// 支持：多平台（openai/deepseek/qwen/zhipu / 自定义 api_base）、并发翻译、
 /// 滑动窗口限速、指数退避重试、术语表，以及实时速率/进度反馈。
 library;
@@ -10,6 +14,8 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+
+import 'nscript.dart' show normalizeTypePrefix;
 
 /// 翻译任务配置（对应 config.json）。
 class TranslateConfig {
@@ -114,7 +120,9 @@ class TranslateState {
 class Semaphore {
   int _permits;
   final _waiters = Queue<Completer<void>>();
-  Semaphore(this._permits);
+
+  /// 并发数至少为 1：0 或负数会让所有任务永远等待（界面卡死）。
+  Semaphore(int permits) : _permits = permits < 1 ? 1 : permits;
 
   Future<void> acquire() async {
     if (_permits > 0) {
@@ -141,7 +149,8 @@ class RateLimiter {
   final Queue<double> _window = Queue<double>();
   static const double _windowSec = 1.0;
 
-  RateLimiter(this.maxRps);
+  /// 速率至少为 1 次/秒：<=0 会导致死循环或空队列访问崩溃。
+  RateLimiter(double rps) : maxRps = rps <= 0 ? 1 : rps;
 
   Future<void> wait() async {
     while (_window.length >= maxRps) {
@@ -154,14 +163,24 @@ class RateLimiter {
       final head = _window.first;
       final waitFor = head + _windowSec - now;
       if (waitFor > 0) {
-        await Future.delayed(Duration(microseconds: (waitFor * 1e6).round()));
-        continue;
+        await Future.delayed(
+            Duration(microseconds: (waitFor * 1e6).round()));
       }
     }
     _window.add(_now());
   }
 
   double _now() => DateTime.now().microsecondsSinceEpoch / 1e6;
+}
+
+/// 退避秒数（main：retry_delay * base^attempt；指数封顶防止溢出/超长等待）。
+int backoffSeconds(int retryDelay, int base, int attempt) {
+  final exp = attempt > 5 ? 5 : attempt;
+  var factor = 1;
+  for (var i = 0; i < exp; i++) {
+    factor *= base;
+  }
+  return retryDelay * factor;
 }
 
 /// 翻译引擎。
@@ -174,7 +193,6 @@ class TranslateEngine extends ChangeNotifier {
 
   int _rpsCount = 0;
   int _totalRequests = 0;
-  double _elapsed = 0;
   Timer? _rpsTimer;
   final Stopwatch _stopwatch = Stopwatch();
 
@@ -184,26 +202,24 @@ class TranslateEngine extends ChangeNotifier {
   }
 
   void _appendLog(String msg) {
-    final prev = _state.log;
-    final newLog = [...prev, msg];
-    _emit(_state.copyWith(log: newLog.length > 500 ? newLog.sublist(newLog.length - 500) : newLog));
-  }
-
-  void _bumpRate() {
-    _rpsCount++;
-    _totalRequests++;
+    final newLog = [..._state.log, msg];
+    _emit(_state.copyWith(
+        log: newLog.length > 500 ? newLog.sublist(newLog.length - 500) : newLog));
   }
 
   void cancel() => _cancel = true;
 
-  /// 启动翻译。输入来自 [ReadableSource]，逐行处理。
+  /// 启动翻译。输入来自 [sourceLines]，逐行处理。
+  ///
+  /// [httpClient] 仅供测试注入 MockClient；生产为 null 时使用默认 Client
+  ///（整个任务复用连接）。
   Future<void> translate({
     required TranslateConfig config,
     required List<String> sourceLines,
     required void Function(List<String> results) onComplete,
     required void Function(Object error) onError,
+    http.Client? httpClient,
   }) async {
-    final skipNoSource = lineContainsSourceLanguageDetectable(config.sourceLanguage);
     if (_running) return;
     _running = true;
     _cancel = false;
@@ -216,103 +232,118 @@ class TranslateEngine extends ChangeNotifier {
     _emit(const TranslateState(running: true, total: 0, log: []));
     _emit(_state.copyWith(total: total));
 
-    // 每秒采样一次实时速率
-    _rpsTimer?.cancel();
-    _rpsTimer = Timer.periodic(const Duration(milliseconds: 500), (_) {
-      if (!_running) return;
-      final rate = _rpsCount / 0.5;
-      _rpsCount = 0;
-      final avg = _stopwatch.elapsedMilliseconds > 0
-          ? (_totalRequests * 1000 / _stopwatch.elapsedMilliseconds)
-          : 0.0;
-      _emit(_state.copyWith(currentRate: rate, averageRate: avg));
-    });
+    final client = httpClient ?? http.Client();
+    try {
+      // 每秒采样两次实时速率
+      _rpsTimer?.cancel();
+      _rpsTimer = Timer.periodic(const Duration(milliseconds: 500), (_) {
+        if (!_running) return;
+        final rate = _rpsCount / 0.5;
+        _rpsCount = 0;
+        final avg = _stopwatch.elapsedMilliseconds > 0
+            ? (_totalRequests * 1000 / _stopwatch.elapsedMilliseconds)
+            : 0.0;
+        _emit(_state.copyWith(currentRate: rate, averageRate: avg));
+      });
 
-    final apiBase = config.resolvedBase();
-    final systemPrompt = buildPrompt(config);
-    final rateLimiter = RateLimiter(config.maxRequestsPerSecond);
-    final sem = Semaphore(config.concurrency);
-    final results = List<String>.filled(total, '');
+      final apiBase = config.resolvedBase();
+      final systemPrompt = buildPrompt(config);
+      final rateLimiter = RateLimiter(config.maxRequestsPerSecond);
+      final sem = Semaphore(config.concurrency);
+      // 初始化为原文行（前缀标准化）：翻译成功后被覆盖；
+      // 失败/取消的行保留原文，保证输出文件行结构完整、可直接注入。
+      final results =
+          List<String>.generate(total, (i) => normalizeTypePrefix(sourceLines[i]));
 
-    // 构建任务列表（跳过空行、以及不含源语言文字的整行）
-    final tasks = <(int, String)>[];
-    var skipped = 0;
-    for (var i = 0; i < total; i++) {
-      final line = sourceLines[i];
-      if (line.trim().isEmpty) continue;
-      if (skipNoSource && !lineContainsSourceLanguage(line, config.sourceLanguage)) {
-        results[i] = _normalizePrefix(line); // 该行没有源语言文字，整行跳过并保持原样
-        skipped++;
-        continue;
+      final skipNoSource =
+          lineContainsSourceLanguageDetectable(config.sourceLanguage);
+      // 构建任务列表（跳过空行、以及不含源语言文字的整行）
+      final tasks = <(int, String)>[];
+      var skipped = 0;
+      for (var i = 0; i < total; i++) {
+        final line = sourceLines[i];
+        if (line.trim().isEmpty) continue;
+        if (skipNoSource && !lineContainsSourceLanguage(line, config.sourceLanguage)) {
+          results[i] = normalizeTypePrefix(line); // 无源语言文字，整行保持原样
+          skipped++;
+          continue;
+        }
+        tasks.add((i + 1, line));
       }
-      tasks.add((i + 1, line));
+
+      _appendLog('共 $total 行，开始并发翻译（并发数=${config.concurrency}，'
+          '最大请求速率=${config.maxRequestsPerSecond}/s'
+          '${skipped > 0 ? '，跳过不含原文语言的 $skipped 行' : ''}）');
+
+      var done = skipped;
+      var failed = 0;
+
+      final futures = <Future<void>>[];
+      for (final (lineNo, line) in tasks) {
+        if (_cancel) break;
+        futures.add(_translateOne(
+          config: config,
+          apiBase: apiBase,
+          systemPrompt: systemPrompt,
+          rateLimiter: rateLimiter,
+          sem: sem,
+          client: client,
+          line: line,
+          lineNumber: lineNo,
+          results: results,
+          onCount: () {
+            _rpsCount++;
+            _totalRequests++;
+            _emit(_state.copyWith(currentLine: line));
+          },
+          onSuccess: () {
+            done++;
+            _emit(_state.copyWith(done: done, failed: failed));
+          },
+          onFail: () {
+            failed++;
+            _emit(_state.copyWith(done: done, failed: failed));
+          },
+          onLog: _appendLog,
+        ));
+      }
+
+      await Future.wait(futures);
+
+      // 保留空行
+      for (var i = 0; i < total; i++) {
+        if (sourceLines[i].trim().isEmpty) results[i] = '';
+      }
+
+      _stopwatch.stop();
+
+      final finalState = _state.copyWith(
+        running: false,
+        currentRate: 0,
+        done: done,
+        failed: failed,
+        currentLine: '',
+      );
+      _emit(finalState);
+
+      if (_cancel) {
+        _appendLog('已取消（未翻译的行保留原文）');
+      } else {
+        _appendLog(failed > 0
+            ? '翻译完成，但有 $failed 行失败（失败行保留原文，可用 AI 校对复核）'
+            : '所有行翻译成功！');
+      }
+
+      onComplete(results);
+    } finally {
+      _rpsTimer?.cancel();
+      _stopwatch.stop();
+      _running = false;
+      if (httpClient == null) client.close();
+      // 异常路径也要把 running 置回 false（界面的按钮状态依赖它）
+      if (_state.running) _emit(_state.copyWith(running: false));
+      notifyListeners();
     }
-
-    _appendLog('共 $total 行，开始并发翻译（并发数=${config.concurrency}，'
-        '最大请求速率=${config.maxRequestsPerSecond}/s'
-        '${skipped > 0 ? '，跳过不含原文语言的 $skipped 行' : ''}）');
-
-    final futures = <Future<void>>[];
-    var done = skipped;
-    var failed = 0;
-
-    for (final (lineNo, line) in tasks) {
-      if (_cancel) break;
-      futures.add(_translateOne(
-        config: config,
-        apiBase: apiBase,
-        systemPrompt: systemPrompt,
-        rateLimiter: rateLimiter,
-        sem: sem,
-        line: line,
-        lineNumber: lineNo,
-        results: results,
-        onCount: () {
-          _bumpRate();
-          _emit(_state.copyWith(currentLine: line));
-        },
-        onSuccess: () {
-          done++;
-          _emit(_state.copyWith(done: done, failed: failed));
-        },
-        onFail: () {
-          failed++;
-          _emit(_state.copyWith(done: done, failed: failed));
-        },
-        onLog: _appendLog,
-      ));
-    }
-
-    await Future.wait(futures);
-
-    // 保留空行
-    for (var i = 0; i < total; i++) {
-      if (sourceLines[i].trim().isEmpty) results[i] = '';
-    }
-
-    _rpsTimer?.cancel();
-    _stopwatch.stop();
-    _running = false;
-
-    final finalState = _state.copyWith(
-      running: false,
-      currentRate: 0,
-      done: done,
-      failed: failed,
-      currentLine: '',
-    );
-    _emit(finalState);
-
-    if (_cancel) {
-      _appendLog('已取消');
-    } else {
-      _appendLog(failed > 0 ? '翻译完成，但有 $failed 行失败'
-          : '所有行翻译成功！');
-    }
-
-    onComplete(results);
-
-    notifyListeners();
   }
 
   Future<void> _translateOne({
@@ -321,6 +352,7 @@ class TranslateEngine extends ChangeNotifier {
     required String systemPrompt,
     required RateLimiter rateLimiter,
     required Semaphore sem,
+    required http.Client client,
     required String line,
     required int lineNumber,
     required List<String> results,
@@ -331,27 +363,32 @@ class TranslateEngine extends ChangeNotifier {
   }) async {
     await sem.acquire();
     try {
-      await rateLimiter.wait();
-      onCount();
       final content = await _callAPI(
         config: config,
         apiBase: apiBase,
         systemPrompt: systemPrompt,
         line: line,
         lineNumber: lineNumber,
+        rateLimiter: rateLimiter,
+        client: client,
+        onCount: onCount,
         onLog: onLog,
       );
-      final translated = extractTranslation(content, lineNumber);
-      // 保留源行类型前缀（T:/B:/Q:），使结果可直接用于注入，并统一为半角冒号
-      results[lineNumber - 1] =
-          _normalizePrefix('${_scriptPrefixOf(line)}$translated');
-      if (translated.startsWith('[翻译失败')) {
+      if (content.startsWith('[翻译失败')) {
+        // 失败：results 里保留初始化时的原文行，保证输出文件可注入
+        onLog('第 $lineNumber 行翻译失败，保留原文（$content）');
         onFail();
-      } else {
-        onSuccess();
+        return;
       }
+      final translated = extractTranslation(content, lineNumber);
+      final prefix = _scriptPrefixOf(line);
+      // 源行带类型前缀时：去掉 AI 回显的前缀并标准化为半角 T:/B:/Q:；
+      // 纯文本行（未经提取）保持 AI 译文原样（与 main 一致）。
+      final body = prefix.isEmpty ? translated : _stripEchoedPrefix(translated, line);
+      results[lineNumber - 1] =
+          prefix.isEmpty ? body : normalizeTypePrefix('$prefix$body');
+      onSuccess();
     } catch (e) {
-      results[lineNumber - 1] = '[翻译失败: $e]';
       onLog('第 $lineNumber 行处理异常: $e');
       onFail();
     } finally {
@@ -359,15 +396,21 @@ class TranslateEngine extends ChangeNotifier {
     }
   }
 
+  /// 与 main 的 translate_single_line 对齐：
+  /// 任何一次尝试失败都按退避重试，最终失败返回「[翻译失败 …]」标记，
+  /// 由调用方决定保留原文；每次尝试（含重试）都经过限速器。
   Future<String> _callAPI({
     required TranslateConfig config,
     required String apiBase,
     required String systemPrompt,
     required String line,
     required int lineNumber,
+    required RateLimiter rateLimiter,
+    required http.Client client,
+    required VoidCallback onCount,
     required void Function(String) onLog,
   }) async {
-    const maxRetries = 10;
+    final attempts = config.maxRetries + 1;
     final url = '${apiBase.replaceAll(RegExp(r'/+$'), '')}/chat/completions';
     final headers = {
       'Authorization': 'Bearer ${config.apiKey}',
@@ -383,61 +426,82 @@ class TranslateEngine extends ChangeNotifier {
       'max_tokens': 200,
     };
 
-    for (var attempt = 0; attempt < maxRetries; attempt++) {
-      onLog('--- 翻译第 $lineNumber 行 (尝试 ${attempt + 1}/$maxRetries) ---');
-      final http.Response resp;
+    Object? lastError;
+    for (var attempt = 0; attempt < attempts; attempt++) {
+      onLog('--- 翻译第 $lineNumber 行 (尝试 ${attempt + 1}/$attempts) ---');
       try {
-        resp = await http
+        await rateLimiter.wait();
+        onCount();
+        final resp = await client
             .post(Uri.parse(url), headers: headers, body: jsonEncode(payload))
             .timeout(const Duration(seconds: 120));
-      } on TimeoutException {
-        onLog('第 $lineNumber 行请求超时，尝试 ${attempt + 1}/$maxRetries');
-        if (attempt < maxRetries - 1) {
-          await Future.delayed(Duration(seconds: config.retryDelay << attempt));
+
+        if (resp.statusCode == 500) {
+          lastError = '服务器内部错误 (500)';
+          if (attempt < attempts - 1) {
+            final wait = backoffSeconds(config.retryDelay, 2, attempt);
+            onLog('第 $lineNumber 行，$lastError，等待 $wait 秒后重试…');
+            await Future.delayed(Duration(seconds: wait));
+            continue;
+          }
+          return '[翻译失败: 第 $lineNumber 行翻译失败，已重试 ${config.maxRetries} 次: 服务器内部错误]';
+        }
+
+        if (resp.statusCode == 429) {
+          lastError = '请求频率过高 (429)';
+          if (attempt < attempts - 1) {
+            final wait = backoffSeconds(config.retryDelay, 3, attempt);
+            onLog('第 $lineNumber 行，$lastError，等待 $wait 秒后重试…');
+            await Future.delayed(Duration(seconds: wait));
+            continue;
+          }
+          return '[翻译失败: 第 $lineNumber 行翻译失败，已重试 ${config.maxRetries} 次: 请求频率过高]';
+        }
+
+        if (resp.statusCode >= 400) {
+          // main 的 raise_for_status 同样走通用异常分支重试
+          lastError = 'HTTP ${resp.statusCode}';
+          if (attempt < attempts - 1) {
+            final wait = backoffSeconds(config.retryDelay, 2, attempt);
+            onLog('第 $lineNumber 行，请求失败 $lastError，等待 $wait 秒后重试…');
+            await Future.delayed(Duration(seconds: wait));
+            continue;
+          }
+          return '[翻译失败: 第 $lineNumber 行 HTTP ${resp.statusCode}]';
+        }
+
+        final data = jsonDecode(utf8.decode(resp.bodyBytes));
+        final content = data['choices'][0]['message']['content'] as String?;
+        if (content == null) {
+          throw const FormatException('响应缺少 choices[0].message.content');
+        }
+        return content;
+      } on TimeoutException catch (e) {
+        lastError = e;
+        if (attempt < attempts - 1) {
+          final wait = backoffSeconds(config.retryDelay, 2, attempt);
+          onLog('第 $lineNumber 行请求超时，等待 $wait 秒后重试…');
+          await Future.delayed(Duration(seconds: wait));
           continue;
         }
         return '[翻译失败: 请求超时]';
-      } on Exception catch (e) {
-        onLog('第 $lineNumber 行连接错误，尝试 ${attempt + 1}/$maxRetries: $e');
-        if (attempt < maxRetries - 1) {
-          await Future.delayed(Duration(seconds: config.retryDelay << attempt));
+      } catch (e) {
+        // main 的通用 except 分支：连接错误、响应结构异常等一律重试
+        lastError = e;
+        if (attempt < attempts - 1) {
+          final wait = backoffSeconds(config.retryDelay, 2, attempt);
+          onLog('第 $lineNumber 行请求异常: $e，等待 $wait 秒后重试…');
+          await Future.delayed(Duration(seconds: wait));
           continue;
         }
-        return '[翻译失败: 连接错误]';
+        return '[翻译失败: $e]';
       }
-
-      if (resp.statusCode == 500) {
-        onLog('第 $lineNumber 行服务器内部错误 (500)，尝试 ${attempt + 1}/$maxRetries');
-        if (attempt < maxRetries - 1) {
-          await Future.delayed(Duration(seconds: config.retryDelay << attempt));
-          continue;
-        }
-        throw Exception('第 $lineNumber 行翻译失败，已重试 $maxRetries 次: 服务器内部错误');
-      }
-
-      if (resp.statusCode == 429) {
-        onLog('第 $lineNumber 行请求频率过高 (429)，尝试 ${attempt + 1}/$maxRetries');
-        if (attempt < maxRetries - 1) {
-          await Future.delayed(
-              Duration(seconds: config.retryDelay * 3 * (attempt + 1)));
-          continue;
-        }
-        throw Exception('第 $lineNumber 行翻译失败，已重试 $maxRetries 次: 请求频率过高');
-      }
-
-      if (resp.statusCode >= 400) {
-        throw Exception('第 $lineNumber 行请求失败: HTTP ${resp.statusCode}');
-      }
-
-      final data = jsonDecode(utf8.decode(resp.bodyBytes));
-      final content = data['choices'][0]['message']['content'] as String;
-      return content;
     }
-    throw Exception('第 $lineNumber 行达到最大重试次数');
+    return '[翻译失败: ${lastError ?? '未知错误'}]';
   }
 }
 
-/// 构建系统提示词（含术语表）。
+/// 构建系统提示词（含术语表），文本与 main 的 build_prompt 对齐。
 String buildPrompt(TranslateConfig config) {
   final source = config.sourceLanguage;
   final target = config.targetLanguage;
@@ -446,7 +510,7 @@ String buildPrompt(TranslateConfig config) {
       '请严格按照原文翻译，不要添加额外解释，不要合并或拆分行，保留原文中的序号、'
       '标记符、占位符、换行符、转义符、代码调用过程等特殊内容，保持原来的格式。'
       '原文中的序号、标记符、占位符、换行符、转义符、代码调用过程等特殊内容包括'
-      '\\ 等，请保留这些符号不做修改\n\n'
+      '@ \\ 等 请保留这些符号不做修改\n\n'
       '### 翻译原则\n'
       '忠实准确地进行翻译。原作是伟大艺术作品，允许使用直白或粗俗的描述，'
       '不应随意删减或篡改，不应回避或淡化，以保持作品的原貌。';
@@ -457,7 +521,7 @@ String buildPrompt(TranslateConfig config) {
         .join('\n');
     base += '\n\n### 术语表（必须严格遵守）\n'
         '在翻译过程中，以下术语必须按照指定的翻译进行转换，不得自由发挥：\n'
-        '$termLines';
+        '$termLines\n';
   }
 
   base += '\n\n### 以textarea标签输出译文\n<textarea>\n'
@@ -465,11 +529,11 @@ String buildPrompt(TranslateConfig config) {
   return base;
 }
 
-/// 从 AI 响应中提取译文。
+/// 从 AI 响应中提取译文（main 的 extract_translation_from_line）。
 String extractTranslation(String responseText, int lineNumber) {
-  final match =
-      RegExp(r'<textarea>\s*(.*?)\s*</textarea>', dotAll: true, caseSensitive: false)
-          .firstMatch(responseText);
+  final match = RegExp(r'<textarea>\s*(.*?)\s*</textarea>',
+          dotAll: true, caseSensitive: false)
+      .firstMatch(responseText);
   var translated = match != null ? match.group(1)!.trim() : responseText.trim();
 
   // 去掉行首的序号 / T: 等标记
@@ -530,25 +594,18 @@ String _scriptPrefixOf(String line) {
   return '';
 }
 
-/// 行首类型前缀标准化为半角（如 T：→ T:、T :→ T:）。
-/// 用于翻译结果，保证与注入器要求的 T:/B:/Q: 半角格式一致。
-String _normalizePrefix(String line) {
-  if (line.length >= 2) {
-    final c0 = line[0];
-    final c1 = line[1];
-    final isType =
-        c0 == 'T' || c0 == 'B' || c0 == 'Q';
-    final isColon = c1 == ':' || c1 == '：';
-    if (isType && isColon) {
-      return '$c0:${line.substring(2)}';
-    }
-    // 兼容 T ：（字母后带空格再冒号）
-    if (isType && line.length >= 3 && line[1] == ' ' &&
-        (line[2] == ':' || line[2] == '：')) {
-      return '$c0:${line.substring(3)}';
-    }
+/// AI 有时会在译文中回显类型前缀（如 “T:译文”、“T：译文”）。
+/// 源行本身带前缀时去掉回显，避免与重新添加的前缀叠加成 “T:T:…”
+/// （该前缀随后会泄漏进游戏文本）。
+String _stripEchoedPrefix(String translated, String sourceLine) {
+  if (_scriptPrefixOf(sourceLine).isEmpty) return translated;
+  final norm = normalizeTypePrefix(translated);
+  if (norm.length >= 2 &&
+      norm[1] == ':' &&
+      (norm[0] == 'T' || norm[0] == 'B' || norm[0] == 'Q')) {
+    return norm.substring(2);
   }
-  return line;
+  return norm;
 }
 
 /// [line] 是否包含 [sourceLanguage] 对应的文字（不含则说明无需翻译）。

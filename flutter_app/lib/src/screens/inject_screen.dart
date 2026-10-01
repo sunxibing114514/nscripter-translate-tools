@@ -193,12 +193,12 @@ class _InjectScreenState extends State<InjectScreen> {
     );
   }
 
+  /// 预览文本：按输出编码解码（先按字节截断再宽容解码，避免乱码）。
   String _preview(Uint8List bytes) {
-    try {
-      final text = String.fromCharCodes(bytes);
-      return text.length > 4000 ? '${text.substring(0, 4000)}\n…（已截断，完整内容保存在文件中）' : text;
-    } catch (_) {
-      return '[无法预览二进制内容]';
-    }
+    final cut = bytes.length > 4000 ? bytes.sublist(0, 4000) : bytes;
+    final text = decodeBytes(cut, _outEnc);
+    return text.length > 4000
+        ? '${text.substring(0, 4000)}\n…（已截断，完整内容保存在文件中）'
+        : text;
   }
 }

@@ -10,7 +10,8 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
-import 'translate_engine.dart' show Semaphore, TranslateConfig;
+import 'translate_engine.dart'
+    show Semaphore, TranslateConfig, RateLimiter, backoffSeconds;
 
 /// 单行校验结果。
 class ProofIssue {
@@ -75,10 +76,9 @@ class ProofreadEngine extends ChangeNotifier {
   }
 
   void _log(String msg) {
+    final newLog = [..._state.log, msg];
     _emit(_state.copyWith(
-        log: [..._state.log, msg].length > 300
-            ? [..._state.log, msg].sublist([..._state.log, msg].length - 300)
-            : [..._state.log, msg]));
+        log: newLog.length > 300 ? newLog.sublist(newLog.length - 300) : newLog));
   }
 
   void cancel() => _cancel = true;
@@ -126,45 +126,50 @@ class ProofreadEngine extends ChangeNotifier {
     }
 
     _emit(_state.copyWith(totalWindows: windows.length));
-    final apiBase = config.resolvedBase();
-    final rateLimiter = RateLimiter(config.maxRequestsPerSecond);
-    final sem = Semaphore(config.concurrency);
-    final futures = <Future<void>>[];
-    var done = 0;
-    var failed = 0;
-    var reported = 0;
+    try {
+      final apiBase = config.resolvedBase();
+      final rateLimiter = RateLimiter(config.maxRequestsPerSecond);
+      final sem = Semaphore(config.concurrency);
+      final futures = <Future<void>>[];
+      var done = 0;
+      var failed = 0;
+      var reported = 0;
 
-    for (final (_, pairs) in windows) {
-      if (_cancel) break;
-      futures.add(_checkWindow(
-        config: config,
-        apiBase: apiBase,
-        rateLimiter: rateLimiter,
-        sem: sem,
-        pairs: pairs,
-        windowSize: windowSize,
-        onIssue: (issues) {
-          onBatch(issues);
-          reported += issues.where((i) => !i.ok).length;
-        },
-        onSuccess: () {
-          done++;
-          _emit(_state.copyWith(doneWindows: done, failedWindows: failed));
-        },
-        onFail: () {
-          failed++;
-          _emit(_state.copyWith(doneWindows: done, failedWindows: failed));
-        },
-        onLog: _log,
-      ));
+      for (final (_, pairs) in windows) {
+        if (_cancel) break;
+        futures.add(_checkWindow(
+          config: config,
+          apiBase: apiBase,
+          rateLimiter: rateLimiter,
+          sem: sem,
+          pairs: pairs,
+          windowSize: windowSize,
+          onIssue: (issues) {
+            onBatch(issues);
+            reported += issues.where((i) => !i.ok).length;
+          },
+          onSuccess: () {
+            done++;
+            _emit(_state.copyWith(doneWindows: done, failedWindows: failed));
+          },
+          onFail: () {
+            failed++;
+            _emit(_state.copyWith(doneWindows: done, failedWindows: failed));
+          },
+          onLog: _log,
+        ));
+      }
+
+      await Future.wait(futures);
+      _emit(_state.copyWith(running: false, doneWindows: done, failedWindows: failed));
+      _log('校对完成：共发现 $reported 个疑似问题（含错译/漏译/串行/多译），请人工复核。');
+      onComplete();
+    } finally {
+      // 无论正常结束还是异常（如未知的提供商 api_base），都不能卡在 running
+      _running = false;
+      if (_state.running) _emit(_state.copyWith(running: false));
+      notifyListeners();
     }
-
-    await Future.wait(futures);
-    _running = false;
-    _emit(_state.copyWith(running: false, doneWindows: done, failedWindows: failed));
-    _log('校对完成：共发现 $reported 个疑似问题（含错译/漏译/串行/多译），请人工复核。');
-    onComplete();
-    notifyListeners();
   }
 
   Future<void> _checkWindow({
@@ -207,7 +212,7 @@ class ProofreadEngine extends ChangeNotifier {
     required int windowSize,
     required void Function(String) onLog,
   }) async {
-    const maxRetries = 8;
+    final attempts = config.maxRetries + 1;
     final url = '${apiBase.replaceAll(RegExp(r'/+$'), '')}/chat/completions';
     final headers = {
       'Authorization': 'Bearer ${config.apiKey}',
@@ -246,8 +251,8 @@ class ProofreadEngine extends ChangeNotifier {
     };
 
     String? lastErr;
-    for (var attempt = 0; attempt < maxRetries; attempt++) {
-      onLog('--- 校对窗口(第 $start 行起) 尝试 ${attempt + 1}/$maxRetries ---');
+    for (var attempt = 0; attempt < attempts; attempt++) {
+      onLog('--- 校对窗口(第 $start 行起) 尝试 ${attempt + 1}/$attempts ---');
       final http.Response resp;
       try {
         resp = await http
@@ -255,24 +260,27 @@ class ProofreadEngine extends ChangeNotifier {
             .timeout(const Duration(seconds: 120));
       } on TimeoutException {
         lastErr = '请求超时';
-        if (attempt < maxRetries - 1) {
-          await Future.delayed(Duration(seconds: config.retryDelay << attempt));
+        if (attempt < attempts - 1) {
+          await Future.delayed(
+              Duration(seconds: backoffSeconds(config.retryDelay, 2, attempt)));
           continue;
         }
         throw Exception('校对窗口请求超时');
       } on Exception catch (e) {
         lastErr = '连接错误: $e';
-        if (attempt < maxRetries - 1) {
-          await Future.delayed(Duration(seconds: config.retryDelay << attempt));
+        if (attempt < attempts - 1) {
+          await Future.delayed(
+              Duration(seconds: backoffSeconds(config.retryDelay, 2, attempt)));
           continue;
         }
         throw Exception('校对窗口连接错误');
       }
       if (resp.statusCode == 500 || resp.statusCode == 429) {
         lastErr = 'HTTP ${resp.statusCode}';
-        if (attempt < maxRetries - 1) {
-          await Future.delayed(
-              Duration(seconds: config.retryDelay * 3 * (attempt + 1)));
+        if (attempt < attempts - 1) {
+          await Future.delayed(Duration(
+              seconds: backoffSeconds(
+                  config.retryDelay, resp.statusCode == 429 ? 3 : 2, attempt)));
           continue;
         }
         throw Exception('校对窗口请求失败 HTTP ${resp.statusCode}($lastErr)');
@@ -331,25 +339,4 @@ class ProofreadEngine extends ChangeNotifier {
 extension on ProofIssue {
   ProofIssue copyFor(int lineNo) =>
       ProofIssue(lineNo: lineNo, type: type, detail: detail, suggested: suggested);
-}
-
-/// 滑动窗口速率限制器。
-class RateLimiter {
-  final double maxRps;
-  final List<double> _window = [];
-  static const double _winSec = 1.0;
-  RateLimiter(this.maxRps);
-  Future<void> wait() async {
-    while (_window.length >= maxRps) {
-      final now = DateTime.now().microsecondsSinceEpoch / 1e6;
-      _window.removeWhere((t) => t <= now - _winSec);
-      if (_window.length < maxRps) break;
-      final head = _window.first;
-      final waitFor = head + _winSec - now;
-      if (waitFor > 0) {
-        await Future.delayed(Duration(milliseconds: (waitFor * 1000).round()));
-      }
-    }
-    _window.add(DateTime.now().microsecondsSinceEpoch / 1e6);
-  }
 }

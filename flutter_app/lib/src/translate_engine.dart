@@ -241,7 +241,7 @@ class TranslateEngine extends ChangeNotifier {
       final line = sourceLines[i];
       if (line.trim().isEmpty) continue;
       if (skipNoSource && !lineContainsSourceLanguage(line, config.sourceLanguage)) {
-        results[i] = line; // 该行没有源语言文字，整行跳过并保持原样
+        results[i] = _normalizePrefix(line); // 该行没有源语言文字，整行跳过并保持原样
         skipped++;
         continue;
       }
@@ -342,7 +342,9 @@ class TranslateEngine extends ChangeNotifier {
         onLog: onLog,
       );
       final translated = extractTranslation(content, lineNumber);
-      results[lineNumber - 1] = translated;
+      // 保留源行类型前缀（T:/B:/Q:），使结果可直接用于注入，并统一为半角冒号
+      results[lineNumber - 1] =
+          _normalizePrefix('${_scriptPrefixOf(line)}$translated');
       if (translated.startsWith('[翻译失败')) {
         onFail();
       } else {
@@ -516,6 +518,37 @@ bool lineContainsSourceLanguageDetectable(String sourceLanguage) {
       s == 'ko' ||
       s == 'zh' ||
       s == 'en';
+}
+
+/// 提取源行的类型前缀（T:/B:/Q:），无则返回空串。
+String _scriptPrefixOf(String line) {
+  if (line.length >= 2 &&
+      line[1] == ':' &&
+      (line[0] == 'T' || line[0] == 'B' || line[0] == 'Q')) {
+    return line[0];
+  }
+  return '';
+}
+
+/// 行首类型前缀标准化为半角（如 T：→ T:、T :→ T:）。
+/// 用于翻译结果，保证与注入器要求的 T:/B:/Q: 半角格式一致。
+String _normalizePrefix(String line) {
+  if (line.length >= 2) {
+    final c0 = line[0];
+    final c1 = line[1];
+    final isType =
+        c0 == 'T' || c0 == 'B' || c0 == 'Q';
+    final isColon = c1 == ':' || c1 == '：';
+    if (isType && isColon) {
+      return '$c0:${line.substring(2)}';
+    }
+    // 兼容 T ：（字母后带空格再冒号）
+    if (isType && line.length >= 3 && line[1] == ' ' &&
+        (line[2] == ':' || line[2] == '：')) {
+      return '$c0:${line.substring(3)}';
+    }
+  }
+  return line;
 }
 
 /// [line] 是否包含 [sourceLanguage] 对应的文字（不含则说明无需翻译）。

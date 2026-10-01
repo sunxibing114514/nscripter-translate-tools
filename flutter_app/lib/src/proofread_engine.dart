@@ -189,7 +189,7 @@ class ProofreadEngine extends ChangeNotifier {
         windowSize: windowSize,
         onLog: onLog,
       );
-      onLog('窗口(第 ${start + 1}-${start + pairs.length} 行)完成');
+      onLog('窗口(第 $start-${start + pairs.length - 1} 行)完成');
       onIssue(issues);
       onSuccess();
     } catch (e) {
@@ -302,9 +302,9 @@ class ProofreadEngine extends ChangeNotifier {
       if (parts.length < 3) continue;
       final lineNo = int.tryParse(parts[0].replaceAll(RegExp(r'[^\d]'), ''));
       if (lineNo == null || !expectedLines.contains(lineNo)) continue;
-      final type = parts[1].trim().isEmpty ? parts[1] : parts[1].trim();
+      final type = parts[1].trim();
       var typeNorm = '未知';
-      final t = type.replaceAll(RegExp(r'[^\w]'), '').toLowerCase();
+      final t = type.toLowerCase();
       if (t == 'ok') typeNorm = 'OK';
       else if (t.contains('漏') || t.contains('缺')) typeNorm = '漏译';
       else if (t.contains('错')) typeNorm = '错译';

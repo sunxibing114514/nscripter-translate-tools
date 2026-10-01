@@ -1,4 +1,12 @@
 /// 移植自 nscript_tool.py 的文本提取 / 注入核心逻辑。
+///
+/// main（nscript_tool.py）为行为基准：
+/// - 命令一律小写匹配（load_commands 的 cmd.lower()）。
+/// - 命令后紧跟的字符是否为字母数字，按 Unicode 语义判断
+///   （Python str.isalnum 对日文假名/汉字同样返回 True），
+///   否则「endだ…」这类正文会被误判为命令行而漏翻。
+/// - 注入时容忍全角冒号（readme FAQ：T：→T:）并回接续行，
+///   把提取时展开的换行按顺序还原为原行中的 @ / ¥。
 library;
 
 import 'dart:typed_data';
@@ -13,6 +21,35 @@ class ScriptText {
   final String content;
   ScriptText(this.type, this.content);
 }
+
+/// 与 Python str.isalnum 一致：任意文字系统的字母（\p{L}）或数字（\p{N}）。
+final RegExp _alnumRe = RegExp(r'^(?:\p{L}|\p{N})$', unicode: true);
+
+bool _isAlnum(String ch) => _alnumRe.hasMatch(ch);
+
+/// 行首类型前缀标准化为半角（T：→ T:、T :→ T:、B　:→ B:）。
+/// 仅处理 T/B/Q 三种类型字母，用于：
+/// - 翻译结果（保证注入器要求的半角格式）；
+/// - 注入时容忍 AI/手工编辑产生的全角冒号（main 的 readme FAQ）。
+String normalizeTypePrefix(String line) {
+  if (line.length >= 2) {
+    final c0 = line[0];
+    if (c0 != 'T' && c0 != 'B' && c0 != 'Q') return line;
+    var i = 1;
+    // 跳过类型字母与冒号之间的空白（含全角空格）
+    while (i < line.length && (line[i] == ' ' || line[i] == '\u3000')) {
+      i++;
+    }
+    if (i < line.length && (line[i] == ':' || line[i] == '：')) {
+      return '$c0:${line.substring(i + 1)}';
+    }
+  }
+  return line;
+}
+
+/// 统一换行符（等价于 Python 文本模式读取的 universal newlines）。
+String _normalizeNewlines(String s) =>
+    s.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
 
 /// 从双引号开头的字符串中提取内容，支持简单的转义。
 String extractQuotedString(String s) {
@@ -41,23 +78,21 @@ String extractQuotedString(String s) {
   return buf.toString();
 }
 
-/// 将 @ 和 ¥ 替换为换行符。
+/// 将 @ 和 ¥ 替换为换行符（main 的 apply_expand）。
 String applyExpand(String content) =>
     content.replaceAll('@', '\n').replaceAll('¥', '\n');
 
-/// 判断一行是否为命令行。
+/// 判断一行是否为命令行（main 的 is_command_line）。
 bool isCommandLine(String line, Set<String> commands) {
   final trimmed = line.trim();
   if (trimmed.isEmpty) return false;
-  final firstWord =
-      trimmed.split(RegExp(r'\s+')).first.toLowerCase();
+  final firstWord = trimmed.split(RegExp(r'\s+')).first.toLowerCase();
   if (commands.contains(firstWord)) return true;
 
-  if (commands.contains(trimmed.toLowerCase())) return true;
-
-  // 仅比较与首字符一致的命令，避免对每个命令做 startsWith（O(N×M) 慢）。
   final lower = trimmed.toLowerCase();
-  final head = trimmed.isNotEmpty ? lower[0] : '';
+  // 仅比较与首字符一致的命令，避免对每个命令做 startsWith（O(N×M) 慢）。
+  // 命令集已统一小写（见 commands.dart），按首字符过滤是安全的。
+  final head = lower[0];
   for (final cmd in commands) {
     if (cmd.isEmpty) continue;
     if (cmd[0] != head) continue;
@@ -67,14 +102,6 @@ bool isCommandLine(String line, Set<String> commands) {
     }
   }
   return false;
-}
-
-bool _isAlnum(String ch) {
-  final code = ch.codeUnitAt(0);
-  final isDigit = code >= 0x30 && code <= 0x39;
-  final isUpper = code >= 0x41 && code <= 0x5A;
-  final isLower = code >= 0x61 && code <= 0x7A;
-  return isDigit || isUpper || isLower;
 }
 
 /// 处理一行，若为可翻译文本则返回 [ScriptText]，否则返回 null。
@@ -111,51 +138,111 @@ ScriptText? processScriptLine(String line,
   return null;
 }
 
-/// 提取可翻译文本，返回提取结果字符串（格式：`B:`/`Q:`/`T:` 前缀）。
+/// 提取可翻译文本（main 的 do_extract）。
+/// 结果与 main 一致以换行符结尾：'\n'.join(result) + '\n'。
 String extractText(String scriptContent,
     {Set<String>? commands, bool expand = false}) {
   final cmds = commands ?? defaultCommands;
   final result = <String>[];
-  for (final line in scriptContent.split('\n')) {
+  for (final line in _normalizeNewlines(scriptContent).split('\n')) {
     final st = processScriptLine(line, commands: cmds, expandSymbols: expand);
     if (st != null) {
       final prefix = {
         TextType.backtick: 'B',
         TextType.quoted: 'Q',
         TextType.text: 'T',
-      }[st.type];
+      }[st.type]!;
       result.add('$prefix:${st.content}');
     }
   }
-  return (result.isEmpty ? '' : result.join('\n')) +
-      (result.isEmpty ? '' : '\n');
+  return '${result.join('\n')}\n';
 }
 
-/// 将翻译文件注入回脚本，返回新的脚本内容。
+/// 注入时把译文内容中的换行还原为原行对应位置的 @ / ¥。
+///
+/// 提取（--expand）会把原行中的 @、¥ 展开为换行，翻译文件里表现为
+/// 物理续行；注入器把续行并回后，译文内容里仍是换行。直接写入会
+/// 破坏脚本行结构，这里按出现顺序映射回原行中的符号；原行没有更多
+/// 符号时退回 '@'（NScripter 的换行+点击等待符），保证不产生乱行。
+///
+/// 另外，原行以 @/¥ 结尾时，展开产生的末尾换行在翻译文件里是空行、
+/// 会被当作空行过滤掉，导致结尾符号丢失（main 同样丢失，游戏里表现为
+/// 该行不等待点击直接继续）。当译文完全没有出现任何 @/¥（符号无迹可循）
+/// 且换行数少于原行符号数时，把结尾符号补回。
+String _restoreBreakSymbols(String translated, String original) {
+  final raw = translated;
+  final symbols = <String>[];
+  for (var i = 0; i < original.length; i++) {
+    final c = original[i];
+    if (c == '@' || c == '¥') symbols.add(c);
+  }
+
+  var content = translated;
+  var k = 0;
+  if (content.contains('\n')) {
+    final buf = StringBuffer();
+    for (var i = 0; i < content.length; i++) {
+      final c = content[i];
+      if (c == '\n') {
+        buf.write(k < symbols.length ? symbols[k] : '@');
+        k++;
+      } else {
+        buf.write(c);
+      }
+    }
+    content = buf.toString();
+  }
+
+  if (original.isNotEmpty) {
+    final last = original[original.length - 1];
+    if ((last == '@' || last == '¥') &&
+        k < symbols.length &&
+        !raw.contains('@') &&
+        !raw.contains('¥') &&
+        !content.endsWith(last)) {
+      content += last;
+    }
+  }
+  return content;
+}
+
+/// 将翻译文件注入回脚本，返回新的脚本内容（main 的 do_inject）。
+///
+/// 与 main 的差异（均为打通「提取→翻译→注入」链路所必需）：
+/// - 类型前缀容忍全角冒号 / 前缀空格（main 会直接报
+///   Malformed translation line，readme FAQ 要求用户手工改 T：→T:）。
+/// - 提取时 --expand 展开的换行产生的无前缀续行并回上一个条目，
+///   否则展开流程在注入时必然中断（main 即如此）。
+/// - 译文内容中的换行按顺序还原为原行中的 @ / ¥。
 String injectText(String scriptContent, String transContent,
     {Set<String>? commands}) {
   final cmds = commands ?? defaultCommands;
+  final normalized = _normalizeNewlines(scriptContent);
   final scriptLines =
-      scriptContent.split('\n').map((l) => l.replaceAll(RegExp(r'\r$'), '')).toList();
+      normalized.isEmpty ? const <String>[] : normalized.split('\n');
 
-  final transItems = <ScriptText>[];
-  for (final rawLine in transContent.split('\n')) {
-    final tl = rawLine.replaceAll(RegExp(r'[\r\n]+$'), '');
-    if (tl.trim().isEmpty) continue;
-    if (tl.length < 2 || tl[1] != ':') {
-      throw FormatException('翻译行格式错误: $tl');
+  const typeMap = {
+    'B': TextType.backtick,
+    'Q': TextType.quoted,
+    'T': TextType.text,
+  };
+
+  final items = <(TextType, String)>[];
+  for (final rawLine in _normalizeNewlines(transContent).split('\n')) {
+    final tl = normalizeTypePrefix(rawLine.trim());
+    if (tl.isEmpty) continue;
+    final isItem = tl.length >= 2 &&
+        tl[1] == ':' &&
+        (tl[0] == 'B' || tl[0] == 'Q' || tl[0] == 'T');
+    if (isItem) {
+      items.add((typeMap[tl[0]]!, tl.substring(2)));
+    } else if (items.isEmpty) {
+      throw FormatException('翻译行缺少 B:/T:/Q: 类型前缀: $tl');
+    } else {
+      // 提取 --expand 展开的换行产生的续行：并回上一个条目
+      final last = items[items.length - 1];
+      items[items.length - 1] = (last.$1, '${last.$2}\n$tl');
     }
-    const typeMap = {
-      'B': TextType.backtick,
-      'Q': TextType.quoted,
-      'T': TextType.text,
-    };
-    final t = typeMap[tl[0]];
-    if (t == null) {
-      throw FormatException(
-          '翻译行存在未知类型前缀: $tl');
-    }
-    transItems.add(ScriptText(t, tl.substring(2)));
   }
 
   final output = <String>[];
@@ -164,19 +251,20 @@ String injectText(String scriptContent, String transContent,
     final orig =
         processScriptLine(line, commands: cmds, expandSymbols: false);
     if (orig != null) {
-      if (idx >= transItems.length) {
+      if (idx >= items.length) {
         throw StateError('脚本中可翻译行数多于翻译条目数');
       }
-      final repl = transItems[idx];
+      final (type, content) = items[idx];
       idx++;
+      final restored = _restoreBreakSymbols(content, orig.content);
       String newLine;
-      switch (repl.type) {
+      switch (type) {
         case TextType.backtick:
-          newLine = '`${repl.content}';
+          newLine = '`$restored';
         case TextType.quoted:
-          newLine = '"${repl.content}"';
+          newLine = '"$restored"';
         case TextType.text:
-          newLine = repl.content;
+          newLine = restored;
       }
       output.add(newLine);
     } else {
@@ -184,10 +272,13 @@ String injectText(String scriptContent, String transContent,
     }
   }
 
-  if (idx != transItems.length) {
+  if (idx != items.length) {
     throw StateError('翻译条目数多于脚本中的可翻译行数');
   }
-  return output.join('\n');
+  if (output.isEmpty) return '';
+  // main 对每行补 '\n'：join 后若尚未以换行结尾则补齐
+  final joined = output.join('\n');
+  return joined.endsWith('\n') ? joined : '$joined\n';
 }
 
 /// 供后台 isolate（compute）调用的提取入口。

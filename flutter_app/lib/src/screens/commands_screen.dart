@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 
 import '../commands.dart';
@@ -28,7 +30,8 @@ class _CommandsScreenState extends State<CommandsScreen> {
       final picked = await pickFileBytes();
       if (picked == null) return;
       final (_, bytes) = picked;
-      final content = String.fromCharCodes(bytes);
+      // 命令表可能含 UTF-8 中文注释；宽容解码避免个别坏字节导致整体失败
+      final content = utf8.decode(bytes, allowMalformed: true);
       final parsed = parseCommandsFile(content);
       setState(() {
         _commands = parsed;

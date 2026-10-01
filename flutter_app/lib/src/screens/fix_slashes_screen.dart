@@ -54,10 +54,10 @@ class _FixSlashesScreenState extends State<FixSlashesScreen> {
     try {
       final orig = decodeBytes(_origBytes!, _encoding);
       final trans = decodeBytes(_transBytes!, _encoding);
-      final out = fixMissingSlashes(orig, trans);
+      final result = fixMissingSlashesDetailed(orig, trans);
       setState(() {
-        _result = encodeString(out, _encoding);
-        _status = '处理完成，缺失的尾部斜杠已修复';
+        _result = encodeString(result.output, _encoding);
+        _status = result.warning ?? '处理完成，缺失的尾部斜杠已修复';
       });
     } catch (e) {
       _showSnack('处理失败：$e');
@@ -88,13 +88,13 @@ class _FixSlashesScreenState extends State<FixSlashesScreen> {
         .showSnackBar(SnackBar(content: Text(msg), duration: const Duration(seconds: 3)));
   }
 
+  /// 预览文本：按所选编码解码（先按字节截断再宽容解码，避免乱码）。
   String _preview(Uint8List bytes) {
-    try {
-      final text = String.fromCharCodes(bytes);
-      return text.length > 4000 ? '${text.substring(0, 4000)}\n…（已截断，完整内容保存在文件中）' : text;
-    } catch (_) {
-      return '[无法预览二进制内容]';
-    }
+    final cut = bytes.length > 4000 ? bytes.sublist(0, 4000) : bytes;
+    final text = decodeBytes(cut, _encoding);
+    return text.length > 4000
+        ? '${text.substring(0, 4000)}\n…（已截断，完整内容保存在文件中）'
+        : text;
   }
 
   @override

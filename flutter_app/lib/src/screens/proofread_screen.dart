@@ -92,14 +92,26 @@ class _ProofreadScreenState extends State<ProofreadScreen> {
   }
 
   List<String> _loadLines(Uint8List? bytes, TextEditingController ctrl, String enc) {
+    String text;
     if (bytes != null) {
-      return decodeBytes(bytes, enc).split('\n');
+      text = decodeBytes(bytes, enc);
+    } else {
+      final path = ctrl.text.trim();
+      if (path.isEmpty) throw StateError('路径为空');
+      text = File(path).existsSync()
+          ? decodeBytes(File(path).readAsBytesSync(), enc)
+          : '';
     }
-    final path = ctrl.text.trim();
-    if (path.isEmpty) throw StateError('路径为空');
-    return File(path).existsSync()
-        ? decodeBytes(File(path).readAsBytesSync(), enc).split('\n')
-        : <String>[];
+    var lines = text
+        .replaceAll('\r\n', '\n')
+        .replaceAll('\r', '\n')
+        .split('\n');
+    // 结尾换行符经 split 产生的尾部空串不是真实行；
+    // 不去掉会对所有文件都触发「原文 N+1 ≠ 译文 N」的误报。
+    if (lines.isNotEmpty && lines.last.isEmpty) {
+      lines.removeLast();
+    }
+    return lines;
   }
 
   Future<void> _start() async {
@@ -155,7 +167,11 @@ class _ProofreadScreenState extends State<ProofreadScreen> {
         onError: (e) => _showSnack('校对失败：$e'),
       );
     } catch (e) {
-      _showSnack('读取文件失败：$e');
+      // 文件读取与引擎异常（如未知提供商且未填 api_base）都提示为校对失败
+      _showSnack('校对失败：$e');
+      if (mounted) {
+        setState(() => _status = '校对失败：$e');
+      }
     }
   }
 
@@ -362,7 +378,8 @@ class _ProofreadScreenState extends State<ProofreadScreen> {
             ),
           ),
       ] else
-        Text('行数过多（$_status），请保存报告查看完整结果。', style: const TextStyle(color: Colors.grey)),
+        Text('行数过多（共 ${_issues.length} 行），请保存报告查看完整结果。',
+            style: const TextStyle(color: Colors.grey)),
     ];
   }
 }

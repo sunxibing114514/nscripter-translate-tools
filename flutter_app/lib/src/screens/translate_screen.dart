@@ -145,28 +145,34 @@ class _TranslateScreenState extends State<TranslateScreen> {
       _showSnack('请填写 API Key');
       return;
     }
+    final List<String> lines;
     try {
       final source = utf8.decode(bytes, allowMalformed: true);
-      final lines =
+      lines =
           source.trimRight().split('\n').map((l) => l.replaceAll('\r', '')).toList();
+    } catch (e) {
+      _showSnack('读取输入文件失败：$e');
+      return;
+    }
 
-      final config = TranslateConfig(
-        provider: _provider,
-        apiKey: _apiKey.text.trim(),
-        apiBase: _apiBase.text.trim(),
-        model: _model.text.trim(),
-        sourceLanguage: _sourceLang.text.trim(),
-        targetLanguage: _targetLang.text.trim(),
-        concurrency: _concurrency,
-        maxRequestsPerSecond: _maxRps.toDouble(),
-        glossary: _parseGlossary(),
-      );
+    final config = TranslateConfig(
+      provider: _provider,
+      apiKey: _apiKey.text.trim(),
+      apiBase: _apiBase.text.trim(),
+      model: _model.text.trim(),
+      sourceLanguage: _sourceLang.text.trim(),
+      targetLanguage: _targetLang.text.trim(),
+      concurrency: _concurrency,
+      maxRequestsPerSecond: _maxRps.toDouble(),
+      glossary: _parseGlossary(),
+    );
 
-      // 输出文件名：原文件名_目标语言.txt
-      final dot = base.lastIndexOf('.');
-      final name = dot == -1 ? base : base.substring(0, dot);
-      final ext = dot == -1 ? '' : base.substring(dot);
+    // 输出文件名：原文件名_目标语言.txt
+    final dot = base.lastIndexOf('.');
+    final name = dot == -1 ? base : base.substring(0, dot);
+    final ext = dot == -1 ? '' : base.substring(dot);
 
+    try {
       await _engine.translate(
         config: config,
         sourceLines: lines,
@@ -178,8 +184,12 @@ class _TranslateScreenState extends State<TranslateScreen> {
         onError: (e) => _showSnack('翻译异常：$e'),
       );
     } catch (e) {
-      _showSnack('读取输入文件失败：$e');
+      // 引擎异常（如未知提供商且未填 api_base）不应误报为文件读取失败
+      _showSnack('翻译启动失败：$e');
+      return;
     }
+    if (!mounted) return;
+    setState(() {});
   }
 
   Future<void> _save() async {
@@ -204,6 +214,16 @@ class _TranslateScreenState extends State<TranslateScreen> {
     if (!mounted) return;
     ScaffoldMessenger.of(context)
         .showSnackBar(SnackBar(content: Text(msg), duration: const Duration(seconds: 3)));
+  }
+
+  /// 预览译文：译文为 UTF-8 字节，先按字节截断再宽容解码
+  ///（原实现用 String.fromCharCodes 把字节当 Latin-1 码位，中文全是乱码）。
+  String _previewBytes(Uint8List bytes) {
+    final cut = bytes.length > 4000 ? bytes.sublist(0, 4000) : bytes;
+    final text = utf8.decode(cut, allowMalformed: true);
+    return text.length > 4000
+        ? '${text.substring(0, 4000)}\n…（已截断，完整内容保存在文件中）'
+        : text;
   }
 
   @override
@@ -244,9 +264,7 @@ class _TranslateScreenState extends State<TranslateScreen> {
                 const SizedBox(height: 12),
                 ResultBox(
                   title: '译文预览（$_outputName）',
-                  text: String.fromCharCodes(_results.length > 4000
-                      ? _results.sublist(0, 4000)
-                      : _results),
+                  text: _previewBytes(_results),
                 ),
               ],
             ],
@@ -425,8 +443,10 @@ class _TranslateScreenState extends State<TranslateScreen> {
                 controller: _concurrencyCtrl,
                 enabled: !st.running,
                 keyboardType: TextInputType.number,
-                onChanged: (v) =>
-                    _concurrency = int.tryParse(v) ?? 3,
+                onChanged: (v) {
+                  final n = int.tryParse(v) ?? 3;
+                  _concurrency = n < 1 ? 1 : n;
+                },
                 decoration: const InputDecoration(
                     labelText: '并发数', border: OutlineInputBorder()),
               ),
@@ -437,7 +457,10 @@ class _TranslateScreenState extends State<TranslateScreen> {
                 controller: _maxRpsCtrl,
                 enabled: !st.running,
                 keyboardType: TextInputType.number,
-                onChanged: (v) => _maxRps = int.tryParse(v) ?? 5,
+                onChanged: (v) {
+                  final n = int.tryParse(v) ?? 5;
+                  _maxRps = n < 1 ? 1 : n;
+                },
                 decoration: const InputDecoration(
                     labelText: '最大每秒请求数', border: OutlineInputBorder()),
               ),

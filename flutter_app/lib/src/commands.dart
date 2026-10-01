@@ -50,8 +50,15 @@ const List<String> _rawCommands = [
   'waveloop', 'wavestop', 'windoweffect', 'windowback',
 ];
 
-/// 默认命令集（运行时去重，避免 const 集合元素重复报错）。
-final Set<String> defaultCommands = <String>{..._rawCommands};
+/// 默认命令集。
+///
+/// main（nscript_tool.py）的 load_commands 对文件中每条命令做 cmd.lower()，
+/// 因此匹配一律是小写比较；这里内置表也必须统一小写，
+/// 否则 #8B0000 / nameSpNum / setTextWindow 等含大写的命令永远无法命中，
+/// 对应脚本行会被误判为可翻译文本（颜色码/命令被提取出去破坏脚本）。
+final Set<String> defaultCommands = _rawCommands
+    .map((c) => c.toLowerCase())
+    .toSet();
 
 /// 从文本内容加载命令集：每行一个命令，忽略空行与 # 注释。
 /// 返回空集合时回退到 [defaultCommands]。

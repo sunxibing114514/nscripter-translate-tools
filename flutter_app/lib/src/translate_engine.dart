@@ -589,7 +589,8 @@ String _scriptPrefixOf(String line) {
   if (line.length >= 2 &&
       line[1] == ':' &&
       (line[0] == 'T' || line[0] == 'B' || line[0] == 'Q')) {
-    return line[0];
+    // 带冒号返回，直接与译文拼接即得到合法的 T:/B:/Q: 前缀
+    return '${line[0]}:';
   }
   return '';
 }

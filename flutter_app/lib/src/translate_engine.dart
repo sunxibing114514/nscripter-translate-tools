@@ -183,6 +183,39 @@ int backoffSeconds(int retryDelay, int base, int attempt) {
   return retryDelay * factor;
 }
 
+/// 从 HTTP 错误响应体中提取可读的失败原因。
+///
+/// OpenAI 兼容代理常用 503/4xx 携带 JSON 错误体（如
+/// {"error":{"code":"model_not_found","message":"No available channel for
+/// model xxx"}}），只显示 "HTTP 503" 会让用户无从排查（模型名填错、
+/// 渠道不可用等关键信息全部丢失）。优先取 error.message，退回原始文本。
+String errorDetailFromBody(http.Response resp) {
+  String body;
+  try {
+    body = resp.body.trim();
+  } catch (_) {
+    return '';
+  }
+  if (body.isEmpty) return '';
+  try {
+    final data = jsonDecode(body);
+    if (data is Map) {
+      final err = data['error'];
+      if (err is Map && err['message'] is String) {
+        final m = (err['message'] as String).trim();
+        if (m.isNotEmpty) return m;
+      }
+      if (data['message'] is String) {
+        final m = (data['message'] as String).trim();
+        if (m.isNotEmpty) return m;
+      }
+    }
+  } catch (_) {
+    // 非 JSON 响应体：退回截断后的原文
+  }
+  return body.length > 200 ? '${body.substring(0, 200)}…' : body;
+}
+
 /// 翻译引擎。
 class TranslateEngine extends ChangeNotifier {
   TranslateState _state = const TranslateState();
@@ -437,37 +470,40 @@ class TranslateEngine extends ChangeNotifier {
             .timeout(const Duration(seconds: 120));
 
         if (resp.statusCode == 500) {
-          lastError = '服务器内部错误 (500)';
+          final detail = errorDetailFromBody(resp);
+          lastError = '服务器内部错误 (500)${detail.isEmpty ? '' : '：$detail'}';
           if (attempt < attempts - 1) {
             final wait = backoffSeconds(config.retryDelay, 2, attempt);
             onLog('第 $lineNumber 行，$lastError，等待 $wait 秒后重试…');
             await Future.delayed(Duration(seconds: wait));
             continue;
           }
-          return '[翻译失败: 第 $lineNumber 行翻译失败，已重试 ${config.maxRetries} 次: 服务器内部错误]';
+          return '[翻译失败: 第 $lineNumber 行翻译失败，已重试 ${config.maxRetries} 次: $lastError]';
         }
 
         if (resp.statusCode == 429) {
-          lastError = '请求频率过高 (429)';
+          final detail = errorDetailFromBody(resp);
+          lastError = '请求频率过高 (429)${detail.isEmpty ? '' : '：$detail'}';
           if (attempt < attempts - 1) {
             final wait = backoffSeconds(config.retryDelay, 3, attempt);
             onLog('第 $lineNumber 行，$lastError，等待 $wait 秒后重试…');
             await Future.delayed(Duration(seconds: wait));
             continue;
           }
-          return '[翻译失败: 第 $lineNumber 行翻译失败，已重试 ${config.maxRetries} 次: 请求频率过高]';
+          return '[翻译失败: 第 $lineNumber 行翻译失败，已重试 ${config.maxRetries} 次: $lastError]';
         }
 
         if (resp.statusCode >= 400) {
-          // main 的 raise_for_status 同样走通用异常分支重试
-          lastError = 'HTTP ${resp.statusCode}';
+          // 503 等服务端错误同样重试（main 的 raise_for_status 走通用异常分支）
+          final detail = errorDetailFromBody(resp);
+          lastError = 'HTTP ${resp.statusCode}${detail.isEmpty ? '' : '：$detail'}';
           if (attempt < attempts - 1) {
             final wait = backoffSeconds(config.retryDelay, 2, attempt);
             onLog('第 $lineNumber 行，请求失败 $lastError，等待 $wait 秒后重试…');
             await Future.delayed(Duration(seconds: wait));
             continue;
           }
-          return '[翻译失败: 第 $lineNumber 行 HTTP ${resp.statusCode}]';
+          return '[翻译失败: 第 $lineNumber 行 $lastError]';
         }
 
         final data = jsonDecode(utf8.decode(resp.bodyBytes));

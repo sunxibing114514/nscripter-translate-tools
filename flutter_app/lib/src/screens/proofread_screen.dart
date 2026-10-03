@@ -258,7 +258,10 @@ class _ProofreadScreenState extends State<ProofreadScreen> {
                       keyboardType: TextInputType.number,
                       decoration: const InputDecoration(
                           labelText: '并发数', border: OutlineInputBorder(), isDense: true),
-                      onChanged: (v) => _concurrency = int.tryParse(v) ?? 3,
+                      onChanged: (v) {
+                        final n = int.tryParse(v) ?? 3;
+                        _concurrency = n < 1 ? 1 : n;
+                      },
                       controller: _concCtrl,
                     ),
                   ),
@@ -268,7 +271,10 @@ class _ProofreadScreenState extends State<ProofreadScreen> {
                       keyboardType: TextInputType.number,
                       decoration: const InputDecoration(
                           labelText: '最大每秒请求数', border: OutlineInputBorder(), isDense: true),
-                      onChanged: (v) => _maxRps = int.tryParse(v) ?? 5,
+                      onChanged: (v) {
+                        final n = int.tryParse(v) ?? 5;
+                        _maxRps = n < 1 ? 1 : n;
+                      },
                       controller: _rpsCtrl,
                     ),
                   ),
